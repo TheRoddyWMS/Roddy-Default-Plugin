@@ -7,27 +7,27 @@ import de.dkfz.roddy.knowledge.files.BaseFile;
  */
 public class FileWithChildren extends BaseFile {
 
-    private TextFile childFile0;
+    private SimpleTestTextFile childFile0;
 
-    private TextFile childFile1;
+    private SimpleTestTextFile childFile1;
 
-    public FileWithChildren(TextFile parentFile) {
+    public FileWithChildren(SimpleTestTextFile parentFile) {
         super(parentFile);
     }
 
-    public TextFile getChildFile0() {
+    public SimpleTestTextFile getChildFile0() {
         return childFile0;
     }
 
-    public void setChildFile0(TextFile childFile0) {
+    public void setChildFile0(SimpleTestTextFile childFile0) {
         this.childFile0 = childFile0;
     }
 
-    public TextFile getChildFile1() {
+    public SimpleTestTextFile getChildFile1() {
         return childFile1;
     }
 
-    public void setChildFile1(TextFile childFile1) {
+    public void setChildFile1(SimpleTestTextFile childFile1) {
         this.childFile1 = childFile1;
     }
 }

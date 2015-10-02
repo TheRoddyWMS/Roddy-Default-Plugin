@@ -10,10 +10,10 @@ public class SimpleWorkflow extends Workflow {
     @Override
     public boolean execute(ExecutionContext context) {
         SimpleRuntimeService srs = (SimpleRuntimeService) context.getRuntimeService();
-        TextFile initialTextFile = srs.createInitialTextFile(context);
-        TextFile textFile1 = initialTextFile.test1(); //(TextFile) GenericMethod.callGenericTool("testScript", initialTextFile);
-        TextFile textFile2 = textFile1.test2();//(TextFile) GenericMethod.callGenericTool("testScript", textFile1);
-        TextFile textFile3 = textFile2.test3(); //(TextFile) GenericMethod.callGenericTool("testScriptExitBad", textFile2);
+        SimpleTestTextFile initialTextFile = srs.createInitialTextFile(context);
+        SimpleTestTextFile textFile1 = initialTextFile.test1(); //(TextFile) GenericMethod.callGenericTool("testScript", initialTextFile);
+        SimpleTestTextFile textFile2 = textFile1.test2();//(TextFile) GenericMethod.callGenericTool("testScript", textFile1);
+        SimpleTestTextFile textFile3 = textFile2.test3(); //(TextFile) GenericMethod.callGenericTool("testScriptExitBad", textFile2);
         return true;
     }
 }

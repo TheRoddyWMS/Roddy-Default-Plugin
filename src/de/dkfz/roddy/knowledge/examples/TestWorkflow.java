@@ -9,11 +9,11 @@ public class TestWorkflow extends Workflow {
     @Override
     public boolean execute(ExecutionContext context) {
         SimpleRuntimeService srs = (SimpleRuntimeService) context.getRuntimeService();
-        TextFile initialTextFile = srs.createInitialTextFile(context);
-        TextFile textFile1 = initialTextFile.test1();
+        SimpleTestTextFile initialTextFile = srs.createInitialTextFile(context);
+        SimpleTestTextFile textFile1 = initialTextFile.test1();
         FileWithChildren fileWithChildren = initialTextFile.testFWChildren();
-        TextFile textFile2 = textFile1.test2();
-        TextFile textFile3 = textFile2.test3();
+        SimpleTestTextFile textFile2 = textFile1.test2();
+        SimpleTestTextFile textFile3 = textFile2.test3();
         return true;
     }
 }
