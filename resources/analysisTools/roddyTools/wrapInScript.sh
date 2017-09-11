@@ -165,7 +165,7 @@ else
   myGroup=`groups  | cut -d " " -f 1`
   outputFileGroup=${outputFileGroup-$myGroup}
 
-  $jobProfilerBinary bash ${WRAPPED_SCRIPT}
+  $jobProfilerBinary bash -x ${WRAPPED_SCRIPT}
   exitCode=$?
   echo "Exited script ${WRAPPED_SCRIPT} with value ${exitCode}"
 
