@@ -118,7 +118,7 @@ else
 
   export RODDY_JOBID=${RODDY_JOBID-$$}
   declare -ax RODDY_PARENT_JOBS=${RODDY_PARENT_JOBS-()}
-  echo "RODDY_JOBID is set to ${RODDY_JOBID}"
+  echo "RODDY_JOBID is set to ${RODDY_JOBID}" > /dev/stderr
 
   # Replace #{RODDY_JOBID} in passed variables.
   while read line; do
@@ -134,7 +134,7 @@ else
   defaultScratchDir=${defaultScratchDir-/data/roddyScratch}
   [[ ${RODDY_SCRATCH-x} == "x" ]] && export RODDY_SCRATCH=${defaultScratchDir}/${RODDY_JOBID}
   [[ ! -d ${RODDY_SCRATCH} ]] && mkdir -p ${RODDY_SCRATCH}
-  echo "RODDY_SCRATCH is set to ${RODDY_SCRATCH}"
+  echo "RODDY_SCRATCH is set to ${RODDY_SCRATCH}" > /dev/stderr
 
   # Check
   _lock="$jobStateLogFile~"
