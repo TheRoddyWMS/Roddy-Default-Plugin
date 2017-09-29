@@ -27,10 +27,12 @@ waitForFile() {
     fi
 }
 
-dumpEnvironment() {
+dumpPaths() {
     local message="${1:?No log message given}"
     echo "$message"
+    set +xv
     while IFS='=' read -r -d '' n v; do     [[ -r $v ]] && echo "$v -> "$(readlink -f "$v"); done < <(env -0)
+    if [[ ${debugWrapInScript-false} == true ]]; then set -xv; fi
     echo ""
 }
 
@@ -82,7 +84,8 @@ extendedLogsDir=$(dirname "$CONFIG_FILE")/extendedLogs
 mkdir -p ${extendedLogsDir}
 extendedLogFile=${extendedLogsDir}/$(basename "$PARAMETER_FILE" .parameters)
 
-dumpEnvironment "Files in environment before source configs" >> ${extendedLogFile}
+dumpPaths "Files in environment before source configs" >> ${extendedLogFile}
+env >> ${extendedLogFile}
 
 ## First source the CONFIG_FILE (runtimeConfig.sh) with all the global variables
 waitForFile "$CONFIG_FILE"
@@ -92,11 +95,13 @@ source ${CONFIG_FILE}
 waitForFile "$PARAMETER_FILE"
 source ${PARAMETER_FILE}
 
-dumpEnvironment "Files in environment after source configs" >> ${extendedLogFile}
+dumpPaths "Files in environment after source configs" >> ${extendedLogFile}
+env >> ${extendedLogFile}
 
 runEnvironmentSetupScript
 
-dumpEnvironment "Files in environment after sourcing the environment script" >> ${extendedLogFile}
+dumpPaths "Files in environment after sourcing the environment script" >> ${extendedLogFile}
+env >> ${extendedLogFile}
 
 if [[ ${outputFileGroup-false} != false && ${newGrpIsCalled-false} == false ]]; then
   export newGrpIsCalled=true
