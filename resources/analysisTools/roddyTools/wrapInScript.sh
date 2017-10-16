@@ -1,9 +1,16 @@
 #!/bin/bash
 
 set -e
+set -o pipefail
 
-[[ ${debugWrapInScript-false} == true ]] && set -xv
-[[ ${debugWrapInScript-false} == false ]] && set +xv
+if [[ ${debugWrapInScript-false} == true ]]; then
+    set -xv
+elif [[ ${debugWrapInScript-false} == false ]]; then
+    set +xv
+else
+    echo "Illegal value for debugWrapInScript: '$debugWrapInScript'. Should be {'true', 'false', ''}" > /dev/stderr
+    exit 200
+fi
 
 # This script wraps in another script.
 # The configuration file is sourced and has to be sourced again in the wrapped script.
@@ -15,6 +22,8 @@ set -e
 # Cluster options (like i.e. PBS ) have to be parsed and set before job submission!
 # They will be ignored after the script is wrapped.
 
+# Used to wait for a file expected to appear within the next moments. This is necessary, because in a network filesystems there may be latencies
+# for synchronizing the filesystem between nodes.
 waitForFile() {
     local file="${1:?No file to wait for}"
     local waitCount=0
@@ -27,6 +36,7 @@ waitForFile() {
     fi
 }
 
+# Dump all file paths appearing as variable values in the environment. In particular this dumps the dereferenced symlinks.
 dumpPaths() {
     local message="${1:?No log message given}"
     echo "$message"
@@ -36,9 +46,13 @@ dumpPaths() {
     echo ""
 }
 
+# Given a tool name "x", first prefix all capitals by '_', capitalize the full name, and finally prefix the modified name by "TOOL_".
+# For instance: gcBiasCorrection => TOOL_GC_BIAS_CORRECTION.
 createToolVariableName() {
     local varName="${1:?No variable name given}"
-    echo "$varName" | perl -ne 's/([A-Z])/_$1/g; print uc($_)'
+    local _tmp
+    tmp=$(echo "$varName" | perl -ne 's/([A-Z])/_$1/g; print uc($_)')
+    echo "TOOL_$tmp"
 }
 
 # Bash < 4.2 portability version of `declare -xg`.
@@ -48,20 +62,54 @@ declare_xg() {
     eval "export $varName=\"$value\""
 }
 
+# Given a variable name, if the name starts with \${, assume it represents a tool variable reference, e.g. ${TOOL_GC_BIAS_CORRECTION}, and return the
+# path this reference points to. Otherwise, assume the name refers to a tool name. Then determine the tool variable name (TOOL_...) and get the path
+# referenced. This make it possible to refer to an environment script as a tool either using the ${TOOL_...} form or the raw tool name. For instance:
+#
+# workflowEnvironmentScript=${TOOL_GC_BIAS_CORRECTION} => $TOOL_GC_BIAS_CORRECTION
+# workflowEnvironmentScript=gcBiasCorrections => $TOOL_GC_BIAS_CORRECTION
+getEnvironmentScriptPath() {
+    local varName="${1:?No variable name given}"
+    if (echo "${!varName}" | grep -P '^\${'); then
+        local scriptPath="${!varName}"
+    else
+        local tmp
+        tmp=$(createToolVariableName "${!varName}")
+        local transformedName="$tmp"
+        local scriptPath="${!transformedName}"
+    fi
+    if [[ -z "$scriptPath" ]]; then
+        echo "Requested environment script variable '$varName' does not point to a value" > /dev/stderr
+        exit 200
+    fi
+    echo "$scriptPath"
+}
+
+warnEnvironmentScriptOverride() {
+    if [[ -n "$ENVIRONMENT_SCRIPT" ]]; then
+        echo "ENVIRONMENT_SCRIPT variable is set externally (e.g. in the XML) to '$TOOL_ENVIRONMENT'. It will be reset." > /dev/stderr
+    fi
+}
+
+# Given the name of an environment script variable, such as "workflowEnvironmentScript" or "gcBiasCorrectionEnvironmentScript", as usually declared
+# in the XML, declare the ENVIRONMENT_SCRIPT variable.
+declareEnvironmentScript() {
+    local envScriptVar="${1:-No environment script variable name given}"
+	warnEnvironmentScriptOverride
+	local tmp
+	tmp=$(getEnvironmentScriptPath "$envScriptVar")
+    declare_xg ENVIRONMENT_SCRIPT "$tmp"
+}
+
 # Basic modules / environment support
 # Load the environment script (source), if it is defined. If the file is defined but the file not accessible exit with
 # code 200. Additionally, expose the used environment script path as ENVIRONMENT_SCRIPT variable to the wrapped script.
 runEnvironmentSetupScript() {
     local envScriptVar="${TOOL_ID}EnvironmentScript"
     if [[ -n "${!envScriptVar}" ]]; then
-        # declare -gx ENVIRONMENT_SCRIPT="${!envScriptVar}"
-        declare_xg ENVIRONMENT_SCRIPT "${!envScriptVar}"
+        declareEnvironmentScript "$envScriptVar"
     elif [[ -n "$workflowEnvironmentScript" ]]; then
-        if [[ -n "$ENVIRONMENT_SCRIPT" ]]; then
-            echo "ENVIRONMENT_SCRIPT variable is set externally (e.g. in the XML) to '$TOOL_ENVIRONMENT'. It will be reset." > /dev/stderr
-        fi
-        # declare -gx ENVIRONMENT_SCRIPT="$workflowEnvironmentScript"
-        declare_xg ENVIRONMENT_SCRIPT "$workflowEnvironmentScript"
+        declareEnvironmentScript "workflowEnvironmentScript"
     fi
 
     if [[ -n "$ENVIRONMENT_SCRIPT" ]]; then
@@ -91,18 +139,6 @@ env >> ${extendedLogFile}
 waitForFile "$CONFIG_FILE"
 source ${CONFIG_FILE}
 
-## Then source the PARAMETER_FILE with all the job-specific settings.
-waitForFile "$PARAMETER_FILE"
-source ${PARAMETER_FILE}
-
-dumpPaths "Files in environment after source configs" >> ${extendedLogFile}
-env >> ${extendedLogFile}
-
-runEnvironmentSetupScript
-
-dumpPaths "Files in environment after sourcing the environment script" >> ${extendedLogFile}
-env >> ${extendedLogFile}
-
 if [[ ${outputFileGroup-false} != false && ${newGrpIsCalled-false} == false ]]; then
   export newGrpIsCalled=true
   export LD_LIB_PATH=$LD_LIBRARY_PATH
@@ -120,6 +156,18 @@ else
 
   # Set LD_LIBRARY_PATH to LD_LIB_PATH, if the script was called recursively.
   [[ ${LD_LIB_PATH-false} != false ]] && export LD_LIBRARY_PATH=$LD_LIB_PATH
+
+  ## Then source the PARAMETER_FILE with all the job-specific settings.
+  waitForFile "$PARAMETER_FILE"
+  source ${PARAMETER_FILE}
+
+  dumpPaths "Files in environment after source configs" >> ${extendedLogFile}
+  env >> ${extendedLogFile}
+
+  runEnvironmentSetupScript
+
+  dumpPaths "Files in environment after sourcing the environment script" >> ${extendedLogFile}
+  env >> ${extendedLogFile}
 
   export RODDY_JOBID=${RODDY_JOBID-$$}
   declare -ax RODDY_PARENT_JOBS=${RODDY_PARENT_JOBS-()}
