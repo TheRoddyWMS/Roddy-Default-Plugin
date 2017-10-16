@@ -22,6 +22,8 @@ fi
 # Cluster options (like i.e. PBS ) have to be parsed and set before job submission!
 # They will be ignored after the script is wrapped.
 
+# Used to wait for a file expected to appear within the next moments. This is necessary, because in a network filesystems there may be latencies
+# for synchronizing the filesystem between nodes.
 waitForFile() {
     local file="${1:?No file to wait for}"
     local waitCount=0
@@ -34,6 +36,7 @@ waitForFile() {
     fi
 }
 
+# Dump all file paths appearing as variable values in the environment. In particular this dumps the dereferenced symlinks.
 dumpPaths() {
     local message="${1:?No log message given}"
     echo "$message"
@@ -43,6 +46,8 @@ dumpPaths() {
     echo ""
 }
 
+# Given a tool name "x", first prefix all capitals by '_', capitalize the full name, and finally prefix the modified name by "TOOL_".
+# For instance: gcBiasCorrection => TOOL_GC_BIAS_CORRECTION.
 createToolVariableName() {
     local varName="${1:?No variable name given}"
     local _tmp
@@ -57,6 +62,12 @@ declare_xg() {
     eval "export $varName=\"$value\""
 }
 
+# Given a variable name, if the name starts with \${, assume it represents a tool variable reference, e.g. ${TOOL_GC_BIAS_CORRECTION}, and return the
+# path this reference points to. Otherwise, assume the name refers to a tool name. Then determine the tool variable name (TOOL_...) and get the path
+# referenced. This make it possible to refer to an environment script as a tool either using the ${TOOL_...} form or the raw tool name. For instance:
+#
+# workflowEnvironmentScript=${TOOL_GC_BIAS_CORRECTION} => $TOOL_GC_BIAS_CORRECTION
+# workflowEnvironmentScript=gcBiasCorrections => $TOOL_GC_BIAS_CORRECTION
 getEnvironmentScriptPath() {
     local varName="${1:?No variable name given}"
     if (echo "${!varName}" | grep -P '^\${'); then
@@ -80,21 +91,25 @@ warnEnvironmentScriptOverride() {
     fi
 }
 
+# Given the name of an environment script variable, such as "workflowEnvironmentScript" or "gcBiasCorrectionEnvironmentScript", as usually declared
+# in the XML, declare the ENVIRONMENT_SCRIPT variable.
+declareEnvironmentScript() {
+    local envScriptVar="${1:-No environment script variable name given}"
+	warnEnvironmentScriptOverride
+	local tmp
+	tmp=$(getEnvironmentScriptPath "$envScriptVar")
+    declare_xg ENVIRONMENT_SCRIPT "$tmp"
+}
+
 # Basic modules / environment support
 # Load the environment script (source), if it is defined. If the file is defined but the file not accessible exit with
 # code 200. Additionally, expose the used environment script path as ENVIRONMENT_SCRIPT variable to the wrapped script.
 runEnvironmentSetupScript() {
     local envScriptVar="${TOOL_ID}EnvironmentScript"
     if [[ -n "${!envScriptVar}" ]]; then
-	    warnEnvironmentScriptOverride
-	    local tmp
-	    tmp=$(getEnvironmentScriptPath "$envScriptVar")
-        declare_xg ENVIRONMENT_SCRIPT "$tmp"
+        declareEnvironmentScript "$envScriptVar"
     elif [[ -n "$workflowEnvironmentScript" ]]; then
-	    warnEnvironmentScriptOverride
-	    local tmp
-	    tmp=$(getEnvironmentScriptPath "workflowEnvironmentScript")
-	    declare_xg ENVIRONMENT_SCRIPT "$tmp"
+        declareEnvironmentScript "workflowEnvironmentScript"
     fi
 
     if [[ -n "$ENVIRONMENT_SCRIPT" ]]; then
