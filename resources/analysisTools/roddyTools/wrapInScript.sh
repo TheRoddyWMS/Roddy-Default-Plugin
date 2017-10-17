@@ -3,12 +3,14 @@
 set -e
 set -o pipefail
 
+exec 1>&2
+
 if [[ ${debugWrapInScript-false} == true ]]; then
     set -xv
 elif [[ ${debugWrapInScript-false} == false ]]; then
     set +xv
 else
-    echo "Illegal value for debugWrapInScript: '$debugWrapInScript'. Should be {'true', 'false', ''}" > /dev/stderr
+    echo "Illegal value for debugWrapInScript: '$debugWrapInScript'. Should be {'true', 'false', ''}"
     exit 200
 fi
 
@@ -40,9 +42,13 @@ waitForFile() {
 dumpPaths() {
     local message="${1:?No log message given}"
     echo "$message"
+    # To reduce the debugging output of this function the xtrace and verbose options are temporarily turned off.
+    local DUMP_PATHS___SHELL_OPTIONS
+    DUMP_PATHS___SHELL_OPTIONS=$(set +o)
     set +xv
-    while IFS='=' read -r -d '' n v; do     [[ -r $v ]] && echo "$v -> "$(readlink -f "$v"); done < <(env -0)
+    while IFS='=' read -r -d '' n v; do [[ -r $v ]] && echo "$v -> "$(readlink -f "$v"); done < <(env -0)
     if [[ ${debugWrapInScript-false} == true ]]; then set -xv; fi
+    eval "$DUMP_PATHS___SHELL_OPTIONS"
     echo ""
 }
 
@@ -79,7 +85,7 @@ getEnvironmentScriptPath() {
         local scriptPath="${!transformedName}"
     fi
     if [[ -z "$scriptPath" ]]; then
-        echo "Requested environment script variable '$varName' does not point to a value" > /dev/stderr
+        echo "Requested environment script variable '$varName' does not point to a value"
         exit 200
     fi
     echo "$scriptPath"
@@ -87,7 +93,7 @@ getEnvironmentScriptPath() {
 
 warnEnvironmentScriptOverride() {
     if [[ -n "$ENVIRONMENT_SCRIPT" ]]; then
-        echo "ENVIRONMENT_SCRIPT variable is set externally (e.g. in the XML) to '$TOOL_ENVIRONMENT'. It will be reset." > /dev/stderr
+        echo "ENVIRONMENT_SCRIPT variable is set externally (e.g. in the XML) to '$TOOL_ENVIRONMENT'. It will be reset."
     fi
 }
 
@@ -114,10 +120,10 @@ runEnvironmentSetupScript() {
 
     if [[ -n "$ENVIRONMENT_SCRIPT" ]]; then
         if [[ ! -f "$ENVIRONMENT_SCRIPT" ]]; then
-            echo "ERROR: You defined an environment loader script for the workflow but the script is not available: '$ENVIRONMENT_SCRIPT'" > /dev/stderr
+            echo "ERROR: You defined an environment loader script for the workflow but the script is not available: '$ENVIRONMENT_SCRIPT'"
             exit 200
         fi
-        echo "Sourcing environment setup script from '$ENVIRONMENT_SCRIPT'" > /dev/stderr
+        echo "Sourcing environment setup script from '$ENVIRONMENT_SCRIPT'"
         source "$ENVIRONMENT_SCRIPT"
     fi
 }
@@ -171,7 +177,7 @@ else
 
   export RODDY_JOBID=${RODDY_JOBID-$$}
   declare -ax RODDY_PARENT_JOBS=${RODDY_PARENT_JOBS-()}
-  echo "RODDY_JOBID is set to ${RODDY_JOBID}" > /dev/stderr
+  echo "RODDY_JOBID is set to ${RODDY_JOBID}"
 
   # Replace #{RODDY_JOBID} in passed variables.
   while read line; do
@@ -187,7 +193,7 @@ else
   defaultScratchDir=${defaultScratchDir-/data/roddyScratch}
   [[ ${RODDY_SCRATCH-x} == "x" ]] && export RODDY_SCRATCH=${defaultScratchDir}/${RODDY_JOBID}
   [[ ! -d ${RODDY_SCRATCH} ]] && mkdir -p ${RODDY_SCRATCH}
-  echo "RODDY_SCRATCH is set to ${RODDY_SCRATCH}" > /dev/stderr
+  echo "RODDY_SCRATCH is set to ${RODDY_SCRATCH}"
 
   # Check
   _lock="$jobStateLogFile~"
@@ -237,7 +243,9 @@ else
   outputFileGroup=${outputFileGroup-$myGroup}
 
   exitCode=0
-  $jobProfilerBinary bash -x ${WRAPPED_SCRIPT} || exitCode=$?
+  echo "######################################################### Starting wrapped script ###########################################################"
+  $jobProfilerBinary bash -x ${WRAPPED_SCRIPT} 1>> /dev/stdout 2>> /dev/stderr || exitCode=$?
+  echo "######################################################### Wrapped script ended ##############################################################"
   echo "Exited script ${WRAPPED_SCRIPT} with value ${exitCode}"
 
   # If the tool supports auto checkpoints and the exit code is 0, then go on and create it.
