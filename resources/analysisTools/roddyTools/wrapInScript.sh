@@ -3,12 +3,14 @@
 set -e
 set -o pipefail
 
+exec 1>&2
+
 if [[ ${debugWrapInScript-false} == true ]]; then
     set -xv
 elif [[ ${debugWrapInScript-false} == false ]]; then
     set +xv
 else
-    echo "Illegal value for debugWrapInScript: '$debugWrapInScript'. Should be {'true', 'false', ''}" > /dev/stderr
+    echo "Illegal value for debugWrapInScript: '$debugWrapInScript'. Should be {'true', 'false', ''}"
     exit 200
 fi
 
@@ -21,6 +23,66 @@ fi
 #
 # Cluster options (like i.e. PBS ) have to be parsed and set before job submission!
 # They will be ignored after the script is wrapped.
+
+
+## From http://unix.stackexchange.com/questions/26676/how-to-check-if-a-shell-is-login-interactive-batch
+shellIsInteractive () {
+    case $- in
+        *i*) echo "true";;
+        *)   echo "false";;
+    esac
+}
+export -f shellIsInteractive
+
+
+## funname () ( set +exv; ...; ) may be better to get rid of too much output (mind the (...) subshell) but the exit won't work anymore.
+## Maybe set -E + trap "bla" ERR would work? http://fvue.nl/wiki/Bash:_Error_handling#Exit_on_error
+printStackTrace () {
+    frameNumber=0
+    while caller $frameNumber ;do
+      ((frameNumber++))
+    done
+}
+export -f printStackTrace
+
+
+errout () {
+    local exitCode="$1"
+    local message="$2"
+    env printf "Error(%d): %s\n" "$exitCode" "$message" >> /dev/stderr
+}
+export -f errout
+
+
+## This is to effectively debug on the command line. The exit is only called, in non-interactive sessions.
+## You can either put 'exitIfNonInteractive $code; return $?' at the end of functions, or you put
+## 'exitHere $code || return $?' in the middle of functions to end the control flow in the function and
+## return to the calling function.
+exitIfNonInteractive () {
+    local exitValue="$1"
+    if [[ $(shellIsInteractive) == false ]]; then
+      exit "$exitValue"
+    else
+      echo "In a non-interactive session, I would now do 'exit $exitValue'" >> /dev/stderr
+      return "$exitValue"
+    fi
+}
+export -f exitIfNonInteractive
+
+## throw [code [msg]]
+## Write message (Unspecified error) to STDERR and exit with code (default 1)
+throw () {
+  local lastCommandsExitCode=$?
+  local exitCode="${1-$UNSPECIFIED_ERROR_CODE}"
+  local msg="${2-$UNSPECIFIED_ERROR_MSG}"
+  if [[ $lastCommandsExitCode -ne 0 ]]; then
+    msg="$msg (last exit code: $lastCommandsExitCode)"
+  fi
+  errout "$exitCode" "$msg"
+  printStackTrace
+  exitIfNonInteractive "$exitCode" || return $?
+}
+export -f throw
 
 # Used to wait for a file expected to appear within the next moments. This is necessary, because in a network filesystems there may be latencies
 # for synchronizing the filesystem between nodes.
@@ -40,9 +102,13 @@ waitForFile() {
 dumpPaths() {
     local message="${1:?No log message given}"
     echo "$message"
+    # To reduce the debugging output of this function the xtrace and verbose options are temporarily turned off.
+    local DUMP_PATHS___SHELL_OPTIONS
+    DUMP_PATHS___SHELL_OPTIONS=$(set +o)
     set +xv
-    while IFS='=' read -r -d '' n v; do     [[ -r $v ]] && echo "$v -> "$(readlink -f "$v"); done < <(env -0)
+    while IFS='=' read -r -d '' n v; do [[ -r $v ]] && echo "$v -> "$(readlink -f "$v"); done < <(env -0)
     if [[ ${debugWrapInScript-false} == true ]]; then set -xv; fi
+    eval "$DUMP_PATHS___SHELL_OPTIONS"
     echo ""
 }
 
@@ -58,7 +124,7 @@ createToolVariableName() {
 # Bash < 4.2 portability version of `declare -xg`.
 declare_xg() {
     local varName="${1:?No variable name given}"
-    local value="$2"
+    local value="${2:-}"
     eval "export $varName=\"$value\""
 }
 
@@ -78,16 +144,16 @@ getEnvironmentScriptPath() {
         local transformedName="$tmp"
         local scriptPath="${!transformedName}"
     fi
-    if [[ -z "$scriptPath" ]]; then
-        echo "Requested environment script variable '$varName' does not point to a value" > /dev/stderr
+    if [[ -z "${scriptPath:-}" ]]; then
+        echo "Requested environment script variable '$varName' does not point to a value"
         exit 200
     fi
     echo "$scriptPath"
 }
 
 warnEnvironmentScriptOverride() {
-    if [[ -n "$ENVIRONMENT_SCRIPT" ]]; then
-        echo "ENVIRONMENT_SCRIPT variable is set externally (e.g. in the XML) to '$TOOL_ENVIRONMENT'. It will be reset." > /dev/stderr
+    if [[ -n "${ENVIRONMENT_SCRIPT:-}" ]]; then
+        echo "ENVIRONMENT_SCRIPT variable is set externally (e.g. in the XML) to '$ENVIRONMENT_SCRIPT'. It will be reset."
     fi
 }
 
@@ -106,22 +172,36 @@ declareEnvironmentScript() {
 # code 200. Additionally, expose the used environment script path as ENVIRONMENT_SCRIPT variable to the wrapped script.
 runEnvironmentSetupScript() {
     local envScriptVar="${TOOL_ID}EnvironmentScript"
-    if [[ -n "${!envScriptVar}" ]]; then
+    if [[ -n "${!envScriptVar:-}" ]]; then
         declareEnvironmentScript "$envScriptVar"
-    elif [[ -n "$workflowEnvironmentScript" ]]; then
+    elif [[ -n "${workflowEnvironmentScript:-}" ]]; then
         declareEnvironmentScript "workflowEnvironmentScript"
     fi
 
-    if [[ -n "$ENVIRONMENT_SCRIPT" ]]; then
+    if [[ -n "${ENVIRONMENT_SCRIPT:-}" ]]; then
         if [[ ! -f "$ENVIRONMENT_SCRIPT" ]]; then
-            echo "ERROR: You defined an environment loader script for the workflow but the script is not available: '$ENVIRONMENT_SCRIPT'" > /dev/stderr
+            echo "ERROR: You defined an environment loader script for the workflow but the script is not available: '$ENVIRONMENT_SCRIPT'"
             exit 200
         fi
-        echo "Sourcing environment setup script from '$ENVIRONMENT_SCRIPT'" > /dev/stderr
-        source "$ENVIRONMENT_SCRIPT"
+        echo "Sourcing environment setup script from '$ENVIRONMENT_SCRIPT'"
+        source "$ENVIRONMENT_SCRIPT" || throw 200 "Error sourcing $ENVIRONMENT_SCRIPT"
     fi
 }
 
+# Set the "RODDY_SCRATCH" variable and directory from the predefined "RODDY_SCRATCH" variable or the "defaultScratchDir" variable.
+# Die if the resulting directory is not accessible (executable).
+setupRoddyScratch() {
+  # Default to the data folder on the node
+  defaultScratchDir=${defaultScratchDir-/data/roddyScratch}
+  [[ ${RODDY_SCRATCH-x} == "x" ]] && export RODDY_SCRATCH=${defaultScratchDir}/${RODDY_JOBID}
+  [[ ! -d ${RODDY_SCRATCH} ]] && mkdir -p ${RODDY_SCRATCH}
+
+  if [[ ! -x "$RODDY_SCRATCH" ]]; then
+    throw 200 "Cannot access RODDY_SCRATCH=$RODDY_SCRATCH"
+  else
+    echo "RODDY_SCRATCH is set to ${RODDY_SCRATCH}"
+  fi
+}
 ###### Main ############################################################################################################
 
 [[ ${CONFIG_FILE-false} == false ]] && echo "The parameter CONFIG_FILE is not set but is mandatory!" && exit 200
@@ -137,7 +217,7 @@ env >> ${extendedLogFile}
 
 ## First source the CONFIG_FILE (runtimeConfig.sh) with all the global variables
 waitForFile "$CONFIG_FILE"
-source ${CONFIG_FILE}
+source ${CONFIG_FILE} || throw 200 "Error sourcing $CONFIG_FILE"
 
 if [[ ${outputFileGroup-false} != false && ${newGrpIsCalled-false} == false ]]; then
   export newGrpIsCalled=true
@@ -159,7 +239,7 @@ else
 
   ## Then source the PARAMETER_FILE with all the job-specific settings.
   waitForFile "$PARAMETER_FILE"
-  source ${PARAMETER_FILE}
+  source ${PARAMETER_FILE} || throw 200 "Error sourcing $PARAMETER_FILE"
 
   dumpPaths "Files in environment after source configs" >> ${extendedLogFile}
   env >> ${extendedLogFile}
@@ -170,8 +250,7 @@ else
   env >> ${extendedLogFile}
 
   export RODDY_JOBID=${RODDY_JOBID-$$}
-  declare -ax RODDY_PARENT_JOBS=${RODDY_PARENT_JOBS-()}
-  echo "RODDY_JOBID is set to ${RODDY_JOBID}" > /dev/stderr
+  echo "RODDY_JOBID is set to ${RODDY_JOBID}"
 
   # Replace #{RODDY_JOBID} in passed variables.
   while read line; do
@@ -183,11 +262,7 @@ else
     export RODDY_JOBID=$_temp
   done <<< `export | grep "#{"`
 
-  # Default to the data folder on the node
-  defaultScratchDir=${defaultScratchDir-/data/roddyScratch}
-  [[ ${RODDY_SCRATCH-x} == "x" ]] && export RODDY_SCRATCH=${defaultScratchDir}/${RODDY_JOBID}
-  [[ ! -d ${RODDY_SCRATCH} ]] && mkdir -p ${RODDY_SCRATCH}
-  echo "RODDY_SCRATCH is set to ${RODDY_SCRATCH}" > /dev/stderr
+  setupRoddyScratch
 
   # Check
   _lock="$jobStateLogFile~"
@@ -204,14 +279,15 @@ else
 
   # Check if the jobs parent jobs are stored and passed as a parameter. If so Roddy checks the job jobState logfile
   # if at least one of the parent jobs exited with a value different to 0.
-  if [[ ${#RODDY_PARENT_JOBS} -gt 0 ]]
-  then
-    # Now check all lines in the file
-    for parentJob in ${RODDY_PARENT_JOBS[@]}; do
-      [[ ${exitCode-} == 250 ]] && continue;
-      result=`cat ${jobStateLogFile} | grep -a "^${parentJob}:" | tail -n 1 | cut -d ":" -f 2`
-      [[ ! $result -eq 0 ]] && echo "At least one of this parents jobs exited with an error code. This job will not run." && startCode="ABORTED"
-    done
+
+  # Now check all lines in the file
+  # OMG: Bash sucks sooo much: https://stackoverflow.com/questions/7577052/bash-empty-array-expansion-with-set-u
+  if [[ -n "${RODDY_PARENT_JOBS[@]:-}" ]]; then
+      for parentJob in "${RODDY_PARENT_JOBS[@]}"; do
+         [[ ${exitCode-} == 250 ]] && continue;
+         result=`cat ${jobStateLogFile} | grep -a "^${parentJob}:" | tail -n 1 | cut -d ":" -f 2`
+         [[ $result -ne 0 ]] && echo "At least one of this parents jobs exited with an error code. This job will not run." && startCode="ABORTED"
+      done
   fi
 
   # Check the wrapped script for existence
@@ -237,7 +313,9 @@ else
   outputFileGroup=${outputFileGroup-$myGroup}
 
   exitCode=0
-  $jobProfilerBinary bash -x ${WRAPPED_SCRIPT} || exitCode=$?
+  echo "######################################################### Starting wrapped script ###########################################################"
+  $jobProfilerBinary bash -x ${WRAPPED_SCRIPT} 1>> /dev/stdout 2>> /dev/stderr || exitCode=$?
+  echo "######################################################### Wrapped script ended ##############################################################"
   echo "Exited script ${WRAPPED_SCRIPT} with value ${exitCode}"
 
   # If the tool supports auto checkpoints and the exit code is 0, then go on and create it.
