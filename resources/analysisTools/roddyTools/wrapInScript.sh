@@ -193,15 +193,15 @@ runEnvironmentSetupScript() {
 setupRoddyScratch() {
   if [[ "${RODDY_SCRATCH:-}" == "" ]]; then
     throw 200 "Undefined RODDY_SCRATCH variable."
-  elif [[ ! -x "$RODDY_SCRATCH" ]]; then
-    throw 200 "Cannot access RODDY_SCRATCH=$RODDY_SCRATCH"
-  else
-    if [[ ! -d ${RODDY_SCRATCH} ]]; then
-        mkdir -p ${RODDY_SCRATCH}
-    fi
-    echo "RODDY_SCRATCH is set to ${RODDY_SCRATCH}"
+  elif [[ ! -d ${RODDY_SCRATCH} ]]; then
+    mkdir -p ${RODDY_SCRATCH}
   fi
+  if [[ ! -x "$RODDY_SCRATCH" ]]; then
+    throw 200 "Cannot access RODDY_SCRATCH=$RODDY_SCRATCH"
+  fi
+  echo "RODDY_SCRATCH is set to ${RODDY_SCRATCH}"
 }
+
 ###### Main ############################################################################################################
 
 [[ ${CONFIG_FILE-false} == false ]] && echo "The parameter CONFIG_FILE is not set but is mandatory!" && exit 200
