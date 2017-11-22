@@ -2,8 +2,6 @@
 # Script used to wrap in a native PBS based workflow
 
 # This script wraps in a complete native workflow script and executes it.
-source ${CONFIG_FILE}
-
 cd $(dirname $WRAPPED_SCRIPT)
 
 set -xv
