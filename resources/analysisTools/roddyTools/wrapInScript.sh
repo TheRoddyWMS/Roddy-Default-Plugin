@@ -221,7 +221,9 @@ source ${CONFIG_FILE} || throw 200 "Error sourcing $CONFIG_FILE"
 
 if [[ ${outputFileGroup-false} != false && ${newGrpIsCalled-false} == false ]]; then
   export newGrpIsCalled=true
-  export LD_LIB_PATH=$LD_LIBRARY_PATH
+  if [[ -v LD_LIBRARY_PATH ]]; then
+    export LD_LIB_PATH
+  fi
   # OK so something to note for you. newgrp has an undocumented feature (at least in the manpages)
   # and resets the LD_LIBRARY_PATH to "" if you do -c. -l would work, but is not feasible, as you
   # cannot call a script with it. Also I do not know whether it is possible to use it in a non-
