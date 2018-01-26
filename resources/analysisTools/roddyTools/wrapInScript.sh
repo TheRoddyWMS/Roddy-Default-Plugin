@@ -191,37 +191,54 @@ runEnvironmentSetupScript() {
 # Set the "RODDY_SCRATCH" variable and directory from the predefined "RODDY_SCRATCH" variable or the "defaultScratchDir" variable.
 # Die if the resulting directory is not accessible (executable).
 setupRoddyScratch() {
-  if [[ "${RODDY_SCRATCH:-}" == "" ]]; then
-    throw 200 "Undefined RODDY_SCRATCH variable."
-  elif [[ ! -d ${RODDY_SCRATCH} ]]; then
-    mkdir -p ${RODDY_SCRATCH}
-  fi
-  if [[ ! -x "$RODDY_SCRATCH" ]]; then
-    throw 200 "Cannot access RODDY_SCRATCH=$RODDY_SCRATCH"
-  fi
-  echo "RODDY_SCRATCH is set to ${RODDY_SCRATCH}"
+    if [[ "${RODDY_SCRATCH:-}" == "" ]]; then
+        throw 200 "Undefined RODDY_SCRATCH variable."
+    elif [[ ! -d ${RODDY_SCRATCH} ]]; then
+        mkdir -p ${RODDY_SCRATCH}
+    fi
+    if [[ ! -x "$RODDY_SCRATCH" ]]; then
+        throw 200 "Cannot access RODDY_SCRATCH=$RODDY_SCRATCH"
+    fi
+    echo "RODDY_SCRATCH is set to ${RODDY_SCRATCH}"
+}
+
+# Source the script pointed to be the baseEnvironmentScript variable.
+sourceBaseEnvironmentScript() {
+    if [[ -v baseEnvironmentScript && -n "$baseEnvironmentScript" ]]; then
+        if [[ ! -r "$baseEnvironmentScript" ]]; then
+            throw 200 "Cannot access baseEnvironmentScript: '$baseEnvironmentScript'"
+        fi
+        local sourceBaseEnvironment_SHELL_OPTIONS=$(set +o)
+        set +ue
+        source "$baseEnvironmentScript"
+        eval "$sourceBaseEnvironment_SHELL_OPTIONS"
+    fi
 }
 
 ###### Main ############################################################################################################
 
-[[ ${CONFIG_FILE-false} == false ]] && echo "The parameter CONFIG_FILE is not set but is mandatory!" && exit 200
 [[ ${PARAMETER_FILE-false} == false ]] && echo "The parameter PARAMETER_FILE is not set but is mandatory!" && exit 200
 
+sourceBaseEnvironmentScript
+
 # Store the environment, store file locations in the env
-extendedLogsDir=$(dirname "$CONFIG_FILE")/extendedLogs
+extendedLogsDir=$(dirname "$PARAMETER_FILE")/extendedLogs
 mkdir -p ${extendedLogsDir}
 extendedLogFile=${extendedLogsDir}/$(basename "$PARAMETER_FILE" .parameters)
 
 dumpPaths "Files in environment before source configs" >> ${extendedLogFile}
 env >> ${extendedLogFile}
 
-## First source the CONFIG_FILE (runtimeConfig.sh) with all the global variables
-waitForFile "$CONFIG_FILE"
-source ${CONFIG_FILE} || throw 200 "Error sourcing $CONFIG_FILE"
+## First source the job's PARAMETER_FILE (.parameter) with all the global variables
+waitForFile "$PARAMETER_FILE"
+source ${PARAMETER_FILE} || throw 200 "Error sourcing $PARAMETER_FILE"
 
 if [[ ${outputFileGroup-false} != false && ${newGrpIsCalled-false} == false ]]; then
   export newGrpIsCalled=true
-  export LD_LIB_PATH=$LD_LIBRARY_PATH
+
+  if [[ -v LD_LIBRARY_PATH ]]; then
+    export LD_LIB_PATH="$LD_LIBRARY_PATH"
+  fi
   # OK so something to note for you. newgrp has an undocumented feature (at least in the manpages)
   # and resets the LD_LIBRARY_PATH to "" if you do -c. -l would work, but is not feasible, as you
   # cannot call a script with it. Also I do not know whether it is possible to use it in a non-
