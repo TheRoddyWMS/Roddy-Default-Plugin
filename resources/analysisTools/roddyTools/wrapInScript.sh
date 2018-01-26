@@ -202,7 +202,8 @@ setupRoddyScratch() {
     echo "RODDY_SCRATCH is set to ${RODDY_SCRATCH}"
 }
 
-sourceBaseEnvironment() {
+# Source the script pointed to be the baseEnvironmentScript variable.
+sourceBaseEnvironmentScript() {
     if [[ -v baseEnvironmentScript && -n "$baseEnvironmentScript" ]]; then
         if [[ ! -r "$baseEnvironmentScript" ]]; then
             throw 200 "Cannot access baseEnvironmentScript: '$baseEnvironmentScript'"
@@ -218,7 +219,7 @@ sourceBaseEnvironment() {
 
 [[ ${PARAMETER_FILE-false} == false ]] && echo "The parameter PARAMETER_FILE is not set but is mandatory!" && exit 200
 
-sourceBaseEnvironment
+sourceBaseEnvironmentScript
 
 # Store the environment, store file locations in the env
 extendedLogsDir=$(dirname "$PARAMETER_FILE")/extendedLogs
