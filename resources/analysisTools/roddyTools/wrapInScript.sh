@@ -207,7 +207,10 @@ sourceBaseEnvironment() {
         if [[ ! -r "$baseEnvironmentScript" ]]; then
             throw 200 "Cannot access baseEnvironmentScript: '$baseEnvironmentScript'"
         fi
+        local sourceBaseEnvironment_SHELL_OPTIONS=$(set +o)
+        set +ue
         source "$baseEnvironmentScript"
+        eval "$sourceBaseEnvironment_SHELL_OPTIONS"
     fi
 }
 
