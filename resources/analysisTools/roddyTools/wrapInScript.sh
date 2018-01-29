@@ -320,7 +320,7 @@ else
   export WRAPPED_SCRIPT=${WRAPPED_SCRIPT} # Export script so it can identify itself
 
   # Create directories
-  mkdir -p ${DIR_TEMP} 2 > /dev/null
+  mkdir -p ${DIR_TEMP} 2> /dev/null
 
   echo "Calling script ${WRAPPED_SCRIPT}"
   jobProfilerBinary=${JOB_PROFILER_BINARY-}
