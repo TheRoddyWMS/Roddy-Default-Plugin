@@ -330,13 +330,11 @@ else
   outputFileGroup=${outputFileGroup-$myGroup}
 
   exitCode=0
+  [[ ${disableDebugOptionsForToolscript-false} == true ]] && export WRAPPED_SCRIPT_DEBUG_OPTIONS=""
   echo "######################################################### Starting wrapped script ###########################################################"
-  $jobProfilerBinary bash -x ${WRAPPED_SCRIPT} 1>> /dev/stdout 2>> /dev/stderr || exitCode=$?
+  $jobProfilerBinary bash ${WRAPPED_SCRIPT_DEBUG_OPTIONS-} ${WRAPPED_SCRIPT} || exitCode=$?
   echo "######################################################### Wrapped script ended ##############################################################"
   echo "Exited script ${WRAPPED_SCRIPT} with value ${exitCode}"
-
-  # If the tool supports auto checkpoints and the exit code is 0, then go on and create it.
-  [[ ${AUTOCHECKPOINT-""} && exitCode == 0 ]] && touch ${AUTOCHECKPOINT}
 
   sleep 2
 
