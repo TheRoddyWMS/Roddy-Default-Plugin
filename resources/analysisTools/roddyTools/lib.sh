@@ -41,4 +41,4 @@ setCompressionToolsBasedOnFileCompression() {
 }
 
 
-eval "$DEFAULT_PLUGIN_LIB___SHELL_OPTIONS"
+eval "$DEFAULTPLUGIN_LIB___SHELL_OPTIONS"
