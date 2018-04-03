@@ -188,7 +188,7 @@ runEnvironmentSetupScript() {
     fi
 }
 
-# Set the "RODDY_SCRATCH" variable and directory from the predefined "RODDY_SCRATCH" variable or the "defaultScratchDir" variable.
+# Set the "RODDY_SCRATCH" variable and directory from the predefined "RODDY_SCRATCH" variable or the extended "scratchBaseDirectory" variable.
 # Die if the resulting directory is not accessible (executable).
 setupRoddyScratch() {
     if [[ "${RODDY_SCRATCH:-}" == "" ]]; then
@@ -233,6 +233,9 @@ env >> ${extendedLogFile}
 waitForFile "$PARAMETER_FILE"
 source ${PARAMETER_FILE} || throw 200 "Error sourcing $PARAMETER_FILE"
 
+dumpPaths "Files in environment after source configs" >> ${extendedLogFile}
+env >> ${extendedLogFile}
+
 if [[ ${outputFileGroup-false} != false && ${newGrpIsCalled-false} == false ]]; then
   export newGrpIsCalled=true
 
@@ -254,13 +257,6 @@ else
   # Set LD_LIBRARY_PATH to LD_LIB_PATH, if the script was called recursively.
   [[ ${LD_LIB_PATH-false} != false ]] && export LD_LIBRARY_PATH=$LD_LIB_PATH
 
-  ## Then source the PARAMETER_FILE with all the job-specific settings.
-  waitForFile "$PARAMETER_FILE"
-  source ${PARAMETER_FILE} || throw 200 "Error sourcing $PARAMETER_FILE"
-
-  dumpPaths "Files in environment after source configs" >> ${extendedLogFile}
-  env >> ${extendedLogFile}
-
   runEnvironmentSetupScript
 
   dumpPaths "Files in environment after sourcing the environment script" >> ${extendedLogFile}
@@ -280,6 +276,9 @@ else
   done <<< `export | grep "#{"`
 
   setupRoddyScratch
+  export TMP="$RODDY_SCRATCH"
+  export TEMP="$RODDY_SCRATCH"
+  export TMPDIR="$RODDY_SCRATCH"
 
   # Check
   _lock="$jobStateLogFile~"
@@ -290,7 +289,11 @@ else
 
   useLockfile=true
   [[ -z `which lockfile` ]] && useLockfile=false
-  [[ ${useLockfile} == false ]] && lockCommand=lockfile-create && unlockCommand=lockfile-remove && echo "Set lockfile commands to lockfile-create and lockfile-remove"
+  if [[ ${useLockfile} == false ]]; then
+    lockCommand=lockfile-create
+    unlockCommand=lockfile-remove
+    echo "Set lockfile commands to lockfile-create and lockfile-remove"
+  fi
 
   startCode=STARTED
 
@@ -319,7 +322,7 @@ else
 
   export WRAPPED_SCRIPT=${WRAPPED_SCRIPT} # Export script so it can identify itself
 
-  # Create directories
+  # Create directories. DIR_TEMP is located in the execution store.
   mkdir -p ${DIR_TEMP} 2> /dev/null
 
   echo "Calling script ${WRAPPED_SCRIPT}"

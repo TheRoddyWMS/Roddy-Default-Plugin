@@ -10,7 +10,9 @@ up and is included in the configuration. The configuration settings directly ove
         <!-- A unique ID for an analysis -->
         <cvalue name='jobnamePrefix' value='defaultRoddyJobname' type="string" />
         <cvalue name='inputBaseDirectory' value='$USERHOME/temp/testproject/vbp' type='path'/>
+        <cvalue name='inputAnalysisBaseDirectory' value='${inputBaseDirectory}/${dataSet}' type='path'/>
         <cvalue name='outputBaseDirectory' value='$USERHOME/temp/testproject/rpp' type='path'/>
+        <cvalue name='outputAnalysisBaseDirectory' value='${outputBaseDirectory}/${dataSet}' type='path'/>
 
         <cvalue name='DEBUG' value='TRUE' type='boolean'/>
         <cvalue name='preventJobExecution' value='false' type='boolean'/>
