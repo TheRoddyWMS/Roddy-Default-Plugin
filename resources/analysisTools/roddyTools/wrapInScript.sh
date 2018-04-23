@@ -215,6 +215,22 @@ sourceBaseEnvironmentScript() {
     fi
 }
 
+
+# Check for background jobs and kill them. This will not affect any "disown"ed jobs. These may, or may not get killed by the
+# job management system (PBS, LSF). If your jobs hang although the wrapped script terminated, you probably have a hanging process (e.g.
+# a cat on a named pipe whose remote side was never opened for writing). Check the order of you process invocations and don't use 'disown'.
+killBackgroundJobs() {
+  if [[ $(jobs) != "" ]]; then
+    echo "Wrapped script terminated but background jobs remain:"
+    jobs -l
+    for pid in $(jobs -l | cut -f 2 -d ' '); do
+        kill -SIGKILL "$pid"
+    done
+    # Allow killed the processes to write something to the log.
+    sleep 2
+  fi
+}
+
 ###### Main ############################################################################################################
 
 [[ ${PARAMETER_FILE-false} == false ]] && echo "The parameter PARAMETER_FILE is not set but is mandatory!" && exit 200
@@ -341,14 +357,15 @@ else
 
   sleep 2
 
+
   ${lockCommand} $_lock;
   echo "${RODDY_JOBID}:${exitCode}:"`date +"%s"`":${TOOL_ID}" >> ${jobStateLogFile};
   ${unlockCommand} $_lock
 
+  killBackgroundJobs
+
   # Set this in your command factory class, when roddy should clean up the dir for you.
   [[ ${RODDY_AUTOCLEANUP_SCRATCH-false} == "true" ]] && rm -rf ${RODDY_SCRATCH} && echo "Auto cleaned up RODDY_SCRATCH"
-
-  [[ ${exitCode} -eq 0 ]] && exit 0
 
   [[ ${exitCode} -eq 100 ]] && echo "Finished script with 99 for compatibility reasons with Sun Grid Engine. 100 is reserved for SGE usage." && exit 99
   exit $exitCode
