@@ -189,15 +189,15 @@ runEnvironmentSetupScript() {
 }
 
 # Set the "RODDY_SCRATCH" variable and directory from the predefined "RODDY_SCRATCH" variable or the extended "scratchBaseDirectory" variable.
-# Die if the resulting directory is not accessible (executable).
+# Die if the resulting directory is not accessible (executable, readable and writable).
 setupRoddyScratch() {
     if [[ "${RODDY_SCRATCH:-}" == "" ]]; then
         throw 200 "Undefined RODDY_SCRATCH variable."
     elif [[ ! -d ${RODDY_SCRATCH} ]]; then
         mkdir -p ${RODDY_SCRATCH}
     fi
-    if [[ ! -x "$RODDY_SCRATCH" ]]; then
-        throw 200 "Cannot access RODDY_SCRATCH=$RODDY_SCRATCH"
+    if [[ ! -x "$RODDY_SCRATCH" && ! -r "$RODDY_SCRATCH" && ! -w "$RODDY_SCRATCH" ]]; then
+        throw 200 "Cannot access RODDY_SCRATCH=$RODDY_SCRATCH, please check its access rights"
     fi
     echo "RODDY_SCRATCH is set to ${RODDY_SCRATCH}"
 }
