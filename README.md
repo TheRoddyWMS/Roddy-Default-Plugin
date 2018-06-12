@@ -1,4 +1,6 @@
 # Default Roddy Plugin
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2FTheRoddyWMS%2FRoddy-Default-Plugin.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2FTheRoddyWMS%2FRoddy-Default-Plugin?ref=badge_shield)
+
 
 The root of all Roddy plugins, including the PluginBase plugin.
 
@@ -69,3 +71,7 @@ The following conventions are nothing more than that and are currently not enfor
 * describe the environment in the `description` attribute of the `cvalue` tag
 * the environment setup scripts should be located in the "environments" subdirectory of the workflow directory in the plugin
 
+
+
+## License
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2FTheRoddyWMS%2FRoddy-Default-Plugin.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2FTheRoddyWMS%2FRoddy-Default-Plugin?ref=badge_large)
