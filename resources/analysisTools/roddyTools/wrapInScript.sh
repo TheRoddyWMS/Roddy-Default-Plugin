@@ -357,7 +357,6 @@ else
 
   sleep 2
 
-
   ${lockCommand} $_lock;
   echo "${RODDY_JOBID}:${exitCode}:"`date +"%s"`":${TOOL_ID}" >> ${jobStateLogFile};
   ${unlockCommand} $_lock

@@ -15,7 +15,6 @@ up and is included in the configuration. The configuration settings directly ove
         <cvalue name='outputAnalysisBaseDirectory' value='${outputBaseDirectory}/${dataSet}' type='path'/>
 
         <cvalue name='DEBUG' value='TRUE' type='boolean'/>
-        <cvalue name='preventJobExecution' value='false' type='boolean'/>
         <cvalue name='UNZIPTOOL' value='gunzip' type="filename"/>
         <cvalue name='UNZIPTOOL_OPTIONS' value='-c'/>
         <cvalue name='ZIPTOOL' value='gzip' type="filename"/>
