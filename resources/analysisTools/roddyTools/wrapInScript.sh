@@ -215,19 +215,39 @@ sourceBaseEnvironmentScript() {
     fi
 }
 
-
-# Check for background jobs and kill them. This will not affect any "disown"ed jobs. These may, or may not get killed by the
-# job management system (PBS, LSF). If your jobs hang although the wrapped script terminated, you probably have a hanging process (e.g.
-# a cat on a named pipe whose remote side was never opened for writing). Check the order of you process invocations and don't use 'disown'.
-killBackgroundJobs() {
-  if [[ $(jobs) != "" ]]; then
-    echo "Wrapped script terminated but background jobs remain:"
-    jobs -l
-    for pid in $(jobs -l | cut -f 2 -d ' '); do
-        kill -SIGKILL "$pid"
+# Get list of child processes. There is no guarantee that the processes continue to exist after the call to childProcesses.
+childProcesses() {
+    declare -a pidList=( $(pstree  -a -p $$ | cut -d, -f2 | cut -d" " -f1 | grep -v $$) )
+    for pid in ${pidList[@]}; do
+        # Remove the PIDs for (at least) the cat and grep commands.
+        if processExists "$pid"; then
+            echo "$pid"
+        fi
     done
-    # Allow killed the processes to write something to the log.
-    sleep 2
+}
+
+processesExist() {
+    declare -a pids=( "$@" )
+    if [[ ${#pids[@]} -eq 0 ]]; then
+        throw 100 "No process IDs given"
+    fi
+    ps --no-header --pid "${pid[@]}" > /dev/null
+}
+
+# Check for background jobs and kill them.
+killChildProcesses() {
+  local KILLSIG=TERM
+  declare -a childProcs=( $(childProcesses) )
+  if [[ ${#childProcs[@]} -gt 0 ]]; then
+    echo "Wrapped script terminated but background jobs remain. Killing them with $KILLSIG. Here is the process tree:"
+    pstree -a -p $$
+    for pid in ${childProcs[@]}; do
+        if processesExist "$pid"; then
+            /usr/bin/kill -s "$KILLSIG" "$pid" \
+                || echo "Could not kill process '$pid'"
+            # By '|| echo ...' the wrapper will not be terminated if kill fails because the process already terminated.
+        fi
+    done
   fi
 }
 
@@ -361,7 +381,7 @@ else
   echo "${RODDY_JOBID}:${exitCode}:"`date +"%s"`":${TOOL_ID}" >> ${jobStateLogFile};
   ${unlockCommand} $_lock
 
-  killBackgroundJobs
+  killChildProcesses
 
   # Set this in your command factory class, when roddy should clean up the dir for you.
   [[ ${RODDY_AUTOCLEANUP_SCRATCH-false} == "true" ]] && rm -rf ${RODDY_SCRATCH} && echo "Auto cleaned up RODDY_SCRATCH"
