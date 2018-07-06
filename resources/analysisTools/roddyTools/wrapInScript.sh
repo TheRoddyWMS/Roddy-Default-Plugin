@@ -217,8 +217,10 @@ sourceBaseEnvironmentScript() {
 
 # Get list of child processes. There is no guarantee that the processes continue to exist after the call to childProcesses.
 childProcesses() {
-    declare -a pidList=( $(pstree  -a -p $$ | cut -d, -f2 | cut -d" " -f1 | grep -v $$) )
-    for pid in ${pidList[@]}; do
+    # Note that the terminal sed in the following expression is necessary, because pstree seems to behave differently in interactive and non-
+    # interactive mode. In non-interactive mode, pstree appends a '...' to every non-terminal process ID.
+    declare -a pidList=( $(pstree -a -p $$ | cut -d, -f2 | cut -d" " -f1 | grep -v $$ | sed -r 's/\.*//g') )
+    for pid in "${pidList[@]}"; do
         # Remove the PIDs for (at least) the cat and grep commands.
         if processesExist "$pid"; then
             echo "$pid"
@@ -241,13 +243,10 @@ killChildProcesses() {
   if [[ ${#childProcs[@]} -gt 0 ]]; then
     echo "Wrapped script terminated but background jobs remain. Killing them with $KILLSIG. Here is the process tree:"
     pstree -a -p $$
-    for pid in ${childProcs[@]}; do
-        if processesExist "$pid"; then
-            /usr/bin/kill -s "$KILLSIG" "$pid" \
-                || echo "Could not kill process '$pid'"
-            # By '|| echo ...' the wrapper will not be terminated if kill fails because the process already terminated.
-        fi
-    done
+    # Important: There is actually no guarantee that these PIDs, although they originate from child-processes, are still valid or from the
+    # same process as before. They could now be from another process from this user, or even from another user. The chance that this happens
+    # may be low, because of the way Linux uses PIDs, but it is not zero. So beware.
+    /usr/bin/kill -s "$KILLSIG" "${childProcs[@]}" 2>&1 >> /dev/null || true
   fi
 }
 
