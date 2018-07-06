@@ -220,7 +220,7 @@ childProcesses() {
     declare -a pidList=( $(pstree  -a -p $$ | cut -d, -f2 | cut -d" " -f1 | grep -v $$) )
     for pid in ${pidList[@]}; do
         # Remove the PIDs for (at least) the cat and grep commands.
-        if processExists "$pid"; then
+        if processesExist "$pid"; then
             echo "$pid"
         fi
     done
