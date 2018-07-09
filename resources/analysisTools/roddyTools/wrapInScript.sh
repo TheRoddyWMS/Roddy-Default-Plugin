@@ -14,6 +14,25 @@ else
     exit 200
 fi
 
+bashMajorVersion() {
+    echo $BASH_VERSION | cut -f 1 -d.
+}
+
+bashMinorVersion() {
+    echo $BASH_VERSION | cut -f 2 -d.
+}
+
+assertBashMinMinorVersion() {
+    local major="${1:-0}"
+    local minor="${2:-0}"
+    if [[ $(bashMajorVersion) -lt $major || ($(bashMajorVersion) -eq $major && $(bashMinorVersion) -lt $minor) ]]; then
+        echo "Need at least Bash version $major.$minor to run wrapper" >> /dev/stderr
+        exit 200
+    fi
+}
+
+assertBashMinMinorVersion 4 2
+
 # This script wraps in another script.
 # The configuration file is sourced and has to be sourced again in the wrapped script.
 # A job error entry is created in the results list along with a timestamp
@@ -220,10 +239,13 @@ childProcesses() {
     # Note that the terminal sed in the following expression is necessary, because pstree seems to behave differently in interactive and non-
     # interactive mode. In non-interactive mode, pstree appends a '...' to every non-terminal process ID.
     declare -a pidList=( $(pstree -a -p $$ | cut -d, -f2 | cut -d" " -f1 | grep -v $$ | sed -r 's/\.*//g') )
+
+    ## To get a clean list of subprocesses we remove the PIDs of the cut, grep, and sed commands and that of the current subshell.
     for pid in "${pidList[@]}"; do
-        # Remove the PIDs for (at least) the cat and grep commands.
-        if processesExist "$pid"; then
-            echo "$pid"
+        if [[ "$pid" != "$BASHPID" ]]; then
+            if processesExist "$pid"; then
+                echo "$pid"
+            fi
         fi
     done
 }
@@ -246,7 +268,7 @@ killChildProcesses() {
     # Important: There is actually no guarantee that these PIDs, although they originate from child-processes, are still valid or from the
     # same process as before. They could now be from another process from this user, or even from another user. The chance that this happens
     # may be low, because of the way Linux uses PIDs, but it is not zero. So beware.
-    /usr/bin/kill -s "$KILLSIG" "${childProcs[@]}" 2>&1 >> /dev/null || true
+    /usr/bin/kill -s "$KILLSIG" "${childProcs[@]}" > /dev/null 2>&1 || true
   fi
 }
 
