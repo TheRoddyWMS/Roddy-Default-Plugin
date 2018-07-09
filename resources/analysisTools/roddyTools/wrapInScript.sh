@@ -220,10 +220,14 @@ childProcesses() {
     # Note that the terminal sed in the following expression is necessary, because pstree seems to behave differently in interactive and non-
     # interactive mode. In non-interactive mode, pstree appends a '...' to every non-terminal process ID.
     declare -a pidList=( $(pstree -a -p $$ | cut -d, -f2 | cut -d" " -f1 | grep -v $$ | sed -r 's/\.*//g') )
+
+    ## To get a clean list of subprocesses we remove the PIDs of the cut, grep, and sed commands and that of the current subshell.
+    local currentSubshell=$(bash -c 'echo $PPID')  ## https://stackoverflow.com/questions/20725925/get-pid-of-current-subshell
     for pid in "${pidList[@]}"; do
-        # Remove the PIDs for (at least) the cat and grep commands.
-        if processesExist "$pid"; then
-            echo "$pid"
+        if [[ "$pid" != "$currentSubshellPid" ]]; then
+            if processesExist "$pid"; then
+                echo "$pid"
+            fi
         fi
     done
 }
@@ -240,13 +244,13 @@ processesExist() {
 killChildProcesses() {
   local KILLSIG=TERM
   declare -a childProcs=( $(childProcesses) )
-  if [[ ${#childProcs[@]} -gt 0 ]]; then
+  if [[ ${#childProcs[@]} -gt 1 ]]; then  ## This is > 1, because the $() represents another child process, that
     echo "Wrapped script terminated but background jobs remain. Killing them with $KILLSIG. Here is the process tree:"
     pstree -a -p $$
     # Important: There is actually no guarantee that these PIDs, although they originate from child-processes, are still valid or from the
     # same process as before. They could now be from another process from this user, or even from another user. The chance that this happens
     # may be low, because of the way Linux uses PIDs, but it is not zero. So beware.
-    /usr/bin/kill -s "$KILLSIG" "${childProcs[@]}" 2>&1 >> /dev/null || true
+    /usr/bin/kill -s "$KILLSIG" "${childProcs[@]}" > /dev/null 2>&1 || true
   fi
 }
 
