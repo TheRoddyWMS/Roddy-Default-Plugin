@@ -5,11 +5,39 @@ The root of all Roddy plugins, including the PluginBase plugin.
 All top-level tools or scripts that are supposed to be started on the cluster by Roddy are actually not directly
 started, but are wrapped by the `resources/roddyTools/wrapInScript.sh` contained in this plugin.
 
+## Dependencies
+
+You need at least Bash 4.2 for running the the `wrapInScript.sh`.
+
+## General Structure
+
+The wrap in script has the following general structure
+
+  - setup
+  - source `baseEnvironmentScript` (e.g. `/etc/profile`)
+  - source the job parameter file (`PARAMETER_FILE`)
+  - optionally, if `outputFileGroup` != "false", change to the requested group with `sg` and restart at setup (above)
+  - source job-specific environment script (see "Environment Setup Support" below)
+  - setup scratch directory
+  - update the `jobStateLogfile.txt` using a lock-file
+  - run the wrapped script using bash 
+  - kill child-process still running after the wrapped script ended
+  - update the `jobStateLogfile.txt` with the job's exit code
+  - exit
+
 ## Environment Setup Support
 
-The wrap in script checks whether you have a dedicated environment script defined for the whole workflow or the specific
-cluster job. These variables are usually defined in one of the configuration XMLs or on the commandline via the 
-`--cvalues` parameter.
+The job is started with the default environment configured with your job submission system. Note that some submission options, such as 
+`bsub -env 'all'` allow you so copy your environment from your submission host onto the execution host. As this is error-prone and less 
+reproducible, we advise you against this practice.
+
+Besides the changes the wrapper script does do the environment itself (such as `set -e` in non-interactive mode) it first sources the 
+`baseEnvironmentScript`. This script serves as kind of general configuration of your cluster environment. Usually it something like 
+`/etc/profile` or `$HOME/.profile` or `$HOME/.bashrc`. Note that the `baseEnvironmentScript` variable is taken from Roddy's 
+`applicationProperties.ini`, not from the XML configuration files.
+
+After that the wrapper script checks whether you have a dedicated environment script defined for the whole workflow or the specific
+cluster job. This is defined by variables defined in one of the configuration XMLs or on the commandline via the `--cvalues` parameter.
 
 To define a plugin-level environment, you can add lines like the following to your XMLs:
 
@@ -21,14 +49,18 @@ To define a plugin-level environment, you can add lines like the following to yo
 </processingTools>
 ```
 
-This will declare that the file `resources/workflowName/environments/conda.sh` is to be used as workflow setup
-script for all jobs. Like all "tools" the environment scripts needs to be made executable. 
+This will declare that the file `resources/workflowName/environments/conda.sh` to be used as workflow setup
+script for all jobs. 
 
-Notice the reference to a tool variable in the `cvalue`. Each environment script is represented in Roddy as
+Notice the reference to a "TOOL" variable in the `cvalue`. Each environment script is represented in Roddy as
 a "tool" that has a name, e.g. "myProcessingStepEnv". All tool names, which are conventionally in "camel-case", are exposed 
-to the cluster job environment in a translated form. The tool name is translated in 3 steps by (1) inserting an 
-underscore '\_' before all capitals, (2) changing them to all upper-case, and (3) prepending "TOOL\_" before the name.
-Thus "myProcessingStep" becomes "TOOL_MY_PROCESSING_STEP_ENV". The "workflowEnvirontment_conda" tool from the previous
+to the cluster job environment in a translated form. The tool name is translated in 3 steps by 
+
+  - inserting an underscore '\_' before all capitals, 
+  - changing them to all upper-case, and 
+  - prepending "TOOL\_" before the name.
+  
+Thus "myProcessingStep" becomes "TOOL_MY_PROCESSING_STEP_ENV". The "workflowEnvironment_conda" tool from the previous
 example is translated to "TOOL_WORKFLOW_ENVIRONMENT_CONDA" and points to the `workflowName/environments/conda.sh` _as
 it is available for the cluster job on the remote system_. Therefore in the XML the tool is only specified with a 
 `basepath` relative to the `resources` directory in the plugin.
@@ -47,6 +79,8 @@ Then your `conda.sh` may look like this:
 source activate "$condaEnvironmentName"
 ```
 
+Note that like all Roddy "tools" also the environment scripts need to be executible (although they are source'd).
+
 Additionally, you can specify dedicated scripts for cluster jobs. For instance, the following defines a tool as
 environment script for the `correctGcBias` cluster job (which is also defined as tool).
 
@@ -60,6 +94,29 @@ environment script for the `correctGcBias` cluster job (which is also defined as
 Cluster-job specific environments take precedence over plugin-level environments. Thus you can define a default for your
 plugin and a modified environment for a specific job.
 
+### Debugging and Error Behaviour
+  
+The `debugWrapInScript` variable -- defaulting to `false` -- turns on the `set +xv` verbosity shell options. 
+  
+The `baseEnvironmentScript` is sourced with relaxed values for `set`, i.e. with `set +ue`, because often files like `/etc/profile` are not under the 
+control of the person running the workflow. Changes to the `set` options in the `baseEnvironmentScript` are not inherited by subsequent code in the
+ `wrapInScript.sh`.
+
+The environment script has the same values for the shell options set via `set` in Bash, as the wrapper. In particular this means that `errexit` is 
+set. Changes in the environment script *are* inherited by subsequent code in the `wrapInScript.sh`.
+  
+It is possible to run the same command that Roddy runs as remote job from the interactive command line. The wrapper script recognizes that it is run
+ in an interactive session and avoids an exitting of the Bash upon errors (i.e. `set +e` is set) but should otherwise behave exactly as if run by 
+ `bsub` or `qsub`.
+
+Finally the wrapped script has debugging options `WRAPPED_SCRIPT_DEBUG_OPTIONS`. For convenience, the application of these options can be turned of
+by the `disableDebugOptionsForToolscript`.
+
+### Execution
+
+As stated previously, the wrapped script is executed by Bash. This means you can use a shebang-line to select an arbitrary interpreter, e.g. one you
+have pulled into the environment via the `baseEnvironmentScript` or the workflow- or job-specific environments scripts.
+  
 ### Conventions
 
 The following conventions are nothing more than that and are currently not enforced by Roddy:
@@ -67,5 +124,61 @@ The following conventions are nothing more than that and are currently not enfor
 * use camel-case tool names starting with small letters (e.g. "correctGcBias")
 * append the arbitrary environment name that you want to use to the tool name to get the name of the environment variable
 * describe the environment in the `description` attribute of the `cvalue` tag
-* the environment setup scripts should be located in the "environments" subdirectory of the workflow directory in the plugin
+* the environment setup scripts is located in the "environments" subdirectory of the workflow directory in the plugin
 
+## Changelog
+
+* 1.2.2-3
+
+  - get Bash via `/usr/bin/env`
+  - using a bash 4 feature to do the childprocess listing
+  - child-process killing 
+
+* 1.2.2-2
+
+  - removed unused `preventJobExecution` variable
+  - extended checks for `RODDY_SCRATCH`
+  - add `killBackgroundJobs` to deal with processes not killed by batch-processing system
+  - set generic temporary variables (`TMP`, `TMPDIR`, `TEMP`) to scratch
+  - set {input,output}AnalysisBaseDirectory defaults
+
+
+* 1.2.2-1
+
+  - updated dependency to Roddy 3.0 (note Roddy "2.4" is a development-only version)
+
+* 1.2.2
+
+  - added shunit2 tests
+  - Remove autocheckpoint code
+  - Improve debugging
+  - `disableDebugOptionsForToolscript` to turn off wrapped script debugging
+  - fixed typo that caused `2`-directory to be created in user's home
+  - source `baseEnvironmentScript`
+  - remove `CONFIG_FILE` references (i.e. `runtimeConfig.sh`) 
+  - deal with environments that don't have LD_LIBRARY_PATH undefined when set -u is configured
+  
+* 1.2.1
+
+  - check LD_LIBRARY_PATH definition before exporting, otherwise error with set -u
+
+* 1.2.0
+
+  - `defaultScratchDir` removed
+  - error redirection into stderr
+  - fixed errors if `debugOptionsUseUndefinedVariableBreak` is set
+  - write environment into extended logs
+  - 
+  
+* 1.0.34
+
+  - require Roddy 2.4 (=3.0) and PluginBase 1.0.29
+  - "native" workflow support
+  - removed some older scripts not used anymore (fileStreamBuffer.sh, findOpenPort.sh, jobEpilogue.sh, jobPostEpilogue.sh, streamBuffer.sh)
+  - module support directly in wrapInScript.sh
+  - check parameter and configuration file usability
+  
+* 1.0.33
+
+  - first Github version of the plugin
+  - Roddy 2.3
