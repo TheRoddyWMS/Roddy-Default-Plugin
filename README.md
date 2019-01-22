@@ -69,3 +69,64 @@ The following conventions are nothing more than that and are currently not enfor
 * describe the environment in the `description` attribute of the `cvalue` tag
 * the environment setup scripts should be located in the "environments" subdirectory of the workflow directory in the plugin
 
+## Changelog
+
+* 1.3.0
+
+  - turn on `set -ue` in environment scripts
+  - turn on debugging output in env. script if `debugWrapInScript` is set 
+
+* 1.2.2-3
+
+  - get Bash via `/usr/bin/env`
+  - using a bash 4 feature to do the childprocess listing
+  - child-process killing 
+
+* 1.2.2-2
+
+  - removed unused `preventJobExecution` variable
+  - extended checks for `RODDY_SCRATCH`
+  - add `killBackgroundJobs` to deal with processes not killed by batch-processing system
+  - set generic temporary variables (`TMP`, `TMPDIR`, `TEMP`) to scratch
+  - set {input,output}AnalysisBaseDirectory defaults
+
+
+* 1.2.2-1
+
+  - updated dependency to Roddy 3.0 (note Roddy "2.4" is a development-only version)
+
+* 1.2.2
+
+  - added shunit2 tests
+  - Remove autocheckpoint code
+  - Improve debugging
+  - `disableDebugOptionsForToolscript` to turn off wrapped script debugging
+  - fixed typo that caused `2`-directory to be created in user's home
+  - source `baseEnvironmentScript`
+  - remove `CONFIG_FILE` references (i.e. `runtimeConfig.sh`) 
+  - deal with environments that don't have LD_LIBRARY_PATH undefined when set -u is configured
+  
+* 1.2.1
+
+  - check LD_LIBRARY_PATH definition before exporting, otherwise error with set -u
+
+* 1.2.0
+
+  - `defaultScratchDir` removed
+  - error redirection into stderr
+  - fixed errors if `debugOptionsUseUndefinedVariableBreak` is set
+  - write environment into extended logs
+  - 
+  
+* 1.0.34
+
+  - require Roddy 2.4 (=3.0) and PluginBase 1.0.29
+  - "native" workflow support
+  - removed some older scripts not used anymore (fileStreamBuffer.sh, findOpenPort.sh, jobEpilogue.sh, jobPostEpilogue.sh, streamBuffer.sh)
+  - module support directly in wrapInScript.sh
+  - check parameter and configuration file usability
+  
+* 1.0.33
+
+  - first Github version of the plugin
+  - Roddy 2.3
