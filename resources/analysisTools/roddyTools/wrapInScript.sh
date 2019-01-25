@@ -228,7 +228,7 @@ sourceBaseEnvironmentScript() {
             throw 200 "Cannot access baseEnvironmentScript: '$baseEnvironmentScript'"
         fi
         local sourceBaseEnvironment_SHELL_OPTIONS=$(set +o)
-        set +ue
+        set +uvex    # These need to be unset because the scripts are likely not in the control of the one executing the workflow.
         source "$baseEnvironmentScript"
         eval "$sourceBaseEnvironment_SHELL_OPTIONS"
     fi
@@ -340,16 +340,16 @@ else
   # Check
   _lock="$jobStateLogFile~"
 
-  # Select the proper lock command. lockfile-create is not tested though.
-  lockCommand="lockfile -s 1 -r 50"
-  unlockCommand="rm -f"
-
-  useLockfile=true
-  [[ -z `which lockfile` ]] && useLockfile=false
-  if [[ ${useLockfile} == false ]]; then
+  if [[ -z `which lockfile` ]]; then
+    echo "Set lockfile commands to lockfile-create and lockfile-remove"
+    useLockfile=false
     lockCommand=lockfile-create
     unlockCommand=lockfile-remove
-    echo "Set lockfile commands to lockfile-create and lockfile-remove"
+  else
+    echo "Using 'lockfile' command for locking"
+    useLockfile=true
+    lockCommand="lockfile -s 1 -r 50"
+    unlockCommand="rm -f"
   fi
 
   startCode=STARTED
