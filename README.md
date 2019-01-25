@@ -7,11 +7,11 @@ started, but are wrapped by the `resources/roddyTools/wrapInScript.sh` contained
 
 ## Dependencies
 
-You need at least Bash 4.2 for running the the `wrapInScript.sh`.
+You need at least Bash 4.2 for running the `wrapInScript.sh`.
 
 ## General Structure
 
-The wrap in script has the following general structure
+The wrapper script has the following general structure
 
   - setup
   - source `baseEnvironmentScript` (e.g. `/etc/profile`)
@@ -27,19 +27,16 @@ The wrap in script has the following general structure
 
 ## Environment Setup Support
 
-The job is started with the default environment configured with your job submission system. Note that some submission options, such as 
-`bsub -env 'all'` allow you so copy your environment from your submission host onto the execution host. As this is error-prone and less 
-reproducible, we advise you against this practice.
+The job is started with the default environment configured with your job submission system, also depending on the Roddy configuration.
 
-Besides the changes the wrapper script does do the environment itself (such as `set -e` in non-interactive mode) it first sources the 
-`baseEnvironmentScript`. This script serves as kind of general configuration of your cluster environment. Usually it something like 
+The `baseEnvironmentScript` serves as kind of general configuration of your cluster environment. Usually it sources something like 
 `/etc/profile` or `$HOME/.profile` or `$HOME/.bashrc`. Note that the `baseEnvironmentScript` variable is taken from Roddy's 
 `applicationProperties.ini`, not from the XML configuration files.
 
 After that the wrapper script checks whether you have a dedicated environment script defined for the whole workflow or the specific
 cluster job. This is defined by variables defined in one of the configuration XMLs or on the commandline via the `--cvalues` parameter.
 
-To define a plugin-level environment, you can add lines like the following to your XMLs:
+To define a plugin-level environment setup script, you can add lines like the following to your XMLs:
 
 ```xml
 <cvalue name="workflowEnvironmentScript" value="${TOOL_WORKFLOW_ENVIRONMENT_CONDA}" type="string"
@@ -50,7 +47,7 @@ To define a plugin-level environment, you can add lines like the following to yo
 ```
 
 This will declare that the file `resources/workflowName/environments/conda.sh` to be used as workflow setup
-script for all jobs. 
+script for all jobs. Like all Roddy "tools" such environment scripts need to be executable.
 
 Notice the reference to a "TOOL" variable in the `cvalue`. Each environment script is represented in Roddy as
 a "tool" that has a name, e.g. "myProcessingStepEnv". All tool names, which are conventionally in "camel-case", are exposed 
@@ -61,12 +58,13 @@ to the cluster job environment in a translated form. The tool name is translated
   - prepending "TOOL\_" before the name.
   
 Thus "myProcessingStep" becomes "TOOL_MY_PROCESSING_STEP_ENV". The "workflowEnvironment_conda" tool from the previous
-example is translated to "TOOL_WORKFLOW_ENVIRONMENT_CONDA" and points to the `workflowName/environments/conda.sh` _as
-it is available for the cluster job on the remote system_. Therefore in the XML the tool is only specified with a 
-`basepath` relative to the `resources` directory in the plugin.
+example is translated to "TOOL_WORKFLOW_ENVIRONMENT_CONDA" and points to the `workflowName/environments/conda.sh` _with the path
+available for the cluster job on the remote system after Roddy has copied the scripts_. This base-path may be different for every
+run and therefore in the XML the tool is only specified with a `basepath` attribute-value relative to the `resources` directory in 
+the plugin.
 
-As the environment script is simple `source`'d you can access any variables from within that script. For instance, 
-you may want to also specify the conda environment name in the XML:
+Note that because the environment script is simply `source`'d you can access variables from the parameter-file (`PARAMETER_FILE`,
+sourced before; see above) from within that script. For instance, you may want to also specify the conda environment name in the XML:
 
 ```xml
 <cvalue name="condaEnvironmentName" value="myWorkflow" type="string"
@@ -78,8 +76,6 @@ Then your `conda.sh` may look like this:
 ```bash
 source activate "$condaEnvironmentName"
 ```
-
-Note that like all Roddy "tools" also the environment scripts need to be executible (although they are source'd).
 
 Additionally, you can specify dedicated scripts for cluster jobs. For instance, the following defines a tool as
 environment script for the `correctGcBias` cluster job (which is also defined as tool).
@@ -93,6 +89,28 @@ environment script for the `correctGcBias` cluster job (which is also defined as
 
 Cluster-job specific environments take precedence over plugin-level environments. Thus you can define a default for your
 plugin and a modified environment for a specific job.
+
+### Exporting Variables from the Environment Script
+
+The environment setup scripts are mostly useful for setting up environment variables that can be used in the wrapped script, which does the actual
+job for you.
+
+To achieve this Bash variables need to be exported with the `export` declaration. 
+
+Bash functions can also get exported with `export -f`.
+
+Note that because the mentioned bug in Bash with exported array variables, something like `export -a` won't work, unless you use a very recent
+Bash version. We suggest here to take the same strategy as the `PARAMETER_FILE` does, namely to export them as quoted Bash array string
+
+```bash
+export arrayStringVar="(a b c d)"
+```
+
+and then cast them into Bash arrays in your wrapped script with
+
+```bash
+declare -a arrayVar="$arrayStringVar"
+```
 
 ### Debugging and Error Behaviour
   

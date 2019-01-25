@@ -228,7 +228,7 @@ sourceBaseEnvironmentScript() {
             throw 200 "Cannot access baseEnvironmentScript: '$baseEnvironmentScript'"
         fi
         local sourceBaseEnvironment_SHELL_OPTIONS=$(set +o)
-        set +ue    # These need to be unset because the scripts are likely not in the control of the one executing the workflow.
+        set +uvex    # These need to be unset because the scripts are likely not in the control of the one executing the workflow.
         source "$baseEnvironmentScript"
         eval "$sourceBaseEnvironment_SHELL_OPTIONS"
     fi
