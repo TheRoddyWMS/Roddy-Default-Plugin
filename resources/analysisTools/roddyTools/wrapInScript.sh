@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#
+# Copyright (c) 2019 German Cancer Research Center (DKFZ).
+#
+# Distributed under the MIT License (license terms are at https://github.com/DKFZ-ODCF/AlignmentAndQCWorkflows).
+#
 
 set -e
 set -o pipefail
@@ -151,15 +156,22 @@ declare_xg() {
 # path this reference points to. Otherwise, assume the name refers to a tool name. Then determine the tool variable name (TOOL_...) and get the path
 # referenced. This make it possible to refer to an environment script as a tool either using the ${TOOL_...} form or the raw tool name. For instance:
 #
-# workflowEnvironmentScript=${TOOL_GC_BIAS_CORRECTION} => $TOOL_GC_BIAS_CORRECTION
-# workflowEnvironmentScript=gcBiasCorrections => $TOOL_GC_BIAS_CORRECTION
+# workflowEnvironmentScript=/path/to/script => /path/to/script
+# workflowEnvironmentScript=${TOOL_GC_BIAS_CORRECTION_ENVIRONMENT} => $TOOL_GC_BIAS_CORRECTION_ENVIRONMENT
+# workflowEnvironmentScript=gcBiasCorrectionsEnvironment => $TOOL_GC_BIAS_CORRECTION_ENVIRONMENT
 getEnvironmentScriptPath() {
     local varName="${1:?No variable name given}"
-    if (echo "${!varName}" | grep -P '^\${'); then
-        local scriptPath="${!varName}"
+    local varValue="${!varName}"
+    if (echo "$varValue" | grep -P "/"); then
+        # The environment variable directly refers to a path. Use the path!
+        local scriptPath="$varValue"
+    elif (echo "$varValue" | grep -P '^\${TOOL_'); then
+        # The environment variable points points to a TOOL_ variable name as derived from the XML tool name.
+        local scriptPath="$varValue"
     else
+        # The environment variable is the name of a tool as found in the XML.
         local tmp
-        tmp=$(createToolVariableName "${!varName}")
+        tmp=$(createToolVariableName "$varValue")
         local transformedName="$tmp"
         local scriptPath="${!transformedName}"
     fi
@@ -180,16 +192,16 @@ warnEnvironmentScriptOverride() {
 # in the XML, declare the ENVIRONMENT_SCRIPT variable.
 declareEnvironmentScript() {
     local envScriptVar="${1:-No environment script variable name given}"
-	warnEnvironmentScriptOverride
-	local tmp
-	tmp=$(getEnvironmentScriptPath "$envScriptVar")
+	  warnEnvironmentScriptOverride
+	  local tmp
+	  tmp=$(getEnvironmentScriptPath "$envScriptVar")
     declare_xg ENVIRONMENT_SCRIPT "$tmp"
 }
 
 # Basic modules / environment support
 # Load the environment script (source), if it is defined. If the file is defined but the file not accessible exit with
 # code 200. Additionally, expose the used environment script path as ENVIRONMENT_SCRIPT variable to the wrapped script.
-runEnvironmentSetupScript() {
+sourceEnvironmentSetupScript() {
     local envScriptVar="${TOOL_ID}EnvironmentScript"
     if [[ -n "${!envScriptVar:-}" ]]; then
         declareEnvironmentScript "$envScriptVar"
@@ -227,10 +239,14 @@ sourceBaseEnvironmentScript() {
         if [[ ! -r "$baseEnvironmentScript" ]]; then
             throw 200 "Cannot access baseEnvironmentScript: '$baseEnvironmentScript'"
         fi
+        local sourceBaseEnvironment___ERREXIT=$(if [[ $SHELLOPTS =~ "errexit" ]]; then echo "errexit"; fi)
         local sourceBaseEnvironment_SHELL_OPTIONS=$(set +o)
         set +uvex    # These need to be unset because the scripts are likely not in the control of the one executing the workflow.
         source "$baseEnvironmentScript"
         eval "$sourceBaseEnvironment_SHELL_OPTIONS"
+        if [[ "$sourceBaseEnvironment___ERREXIT" == "errexit" ]]; then
+            set -e
+        fi
     fi
 }
 
@@ -314,7 +330,7 @@ else
   # Set LD_LIBRARY_PATH to LD_LIB_PATH, if the script was called recursively.
   [[ ${LD_LIB_PATH-false} != false ]] && export LD_LIBRARY_PATH=$LD_LIB_PATH
 
-  runEnvironmentSetupScript
+  sourceEnvironmentSetupScript
 
   dumpPaths "Files in environment after sourcing the environment script" >> ${extendedLogFile}
   env >> ${extendedLogFile}
