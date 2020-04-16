@@ -356,16 +356,17 @@ else
   # Check
   _lock="$jobStateLogFile~"
 
-  if [[ -z `which lockfile` ]]; then
+  if [[ -n `which lockfile` ]]; then
+    echo "Using 'lockfile' command for locking"
+    lockCommand="lockfile -s 1 -r 50"
+    unlockCommand="rm -f"
+  elif [[ -n `which lockfile-create` && -n `which lockfile-remove` ]]; then
     echo "Set lockfile commands to lockfile-create and lockfile-remove"
-    useLockfile=false
     lockCommand=lockfile-create
     unlockCommand=lockfile-remove
   else
-    echo "Using 'lockfile' command for locking"
-    useLockfile=true
-    lockCommand="lockfile -s 1 -r 50"
-    unlockCommand="rm -f"
+    echo "No file locking available. Won't continue"
+    exit 1
   fi
 
   startCode=STARTED
