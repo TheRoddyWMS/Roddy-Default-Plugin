@@ -1,3 +1,8 @@
+#
+# Copyright (c) 2020 German Cancer Research Center (DKFZ).
+#
+# Distributed under the MIT License (license terms are at https://github.com/DKFZ-ODCF/AlignmentAndQCWorkflows).
+#
 
 DEFAULTPLUGIN_LIB___SHELL_OPTIONS=$(set +o)
 set +o verbose
