@@ -2,8 +2,7 @@
 
 The root of all Roddy plugins, including the PluginBase plugin.
 
-All top-level tools or scripts that are supposed to be started on the cluster by Roddy are actually not directly
-started, but are wrapped by the `resources/roddyTools/wrapInScript.sh` contained in this plugin.
+All top-level tools or scripts that are supposed to be started on the cluster by Roddy are actually not directly started, but are wrapped by the `resources/roddyTools/wrapInScript.sh` contained in this plugin.
 
 ## Dependencies
 
@@ -54,8 +53,7 @@ Notice the reference to a "TOOL" variable in the `cvalue`. Each environment scri
   - changing all letters to upper-case, and 
   - prepending "TOOL\_" before the name.
   
-Thus "myProcessingStepEnv" becomes "TOOL_MY_PROCESSING_STEP_ENV". The "workflowEnvironment_conda" tool from the previous example is translated to "TOOL_WORKFLOW_ENVIRONMENT_CONDA" and points to the `workflowName/environments/conda.sh` _with the path available for the cluster job on the remote system after Roddy has copied the scripts. This base-path may be different for every run and therefore in the XML the tool is only specified with a `basepath` attribute-value relative to the `resources` directory in 
-the plugin.
+Thus "myProcessingStepEnv" becomes "TOOL_MY_PROCESSING_STEP_ENV". The "workflowEnvironment_conda" tool from the previous example is translated to "TOOL_WORKFLOW_ENVIRONMENT_CONDA" and points to the `workflowName/environments/conda.sh` _with the path available for the cluster job on the remote system after Roddy has copied the scripts_. This base-path may be different for every run and therefore in the XML the tool is only specified with a `basepath` attribute-value relative to the `resources` directory in the plugin.
 
 Note that because the environment script is simply `source`'d you can access variables from the parameter-file (`PARAMETER_FILE`, sourced before; see above) from within that script. For instance, you may want to also specify the conda environment name in the XML:
 
