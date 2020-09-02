@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#
+# Copyright (c) 2020 German Cancer Research Center (DKFZ).
+#
+# Distributed under the MIT License (license terms are at https://github.com/DKFZ-ODCF/AlignmentAndQCWorkflows).
+#
 
 set -e
 set -o pipefail
@@ -228,7 +233,7 @@ sourceBaseEnvironmentScript() {
             throw 200 "Cannot access baseEnvironmentScript: '$baseEnvironmentScript'"
         fi
         local sourceBaseEnvironment_SHELL_OPTIONS=$(set +o)
-        set +uvex    # These need to be unset because the scripts are likely not in the control of the one executing the workflow.
+        set +uvex    # Need to be unset because the scripts may be out of control of the person executing the workflow.
         source "$baseEnvironmentScript"
         eval "$sourceBaseEnvironment_SHELL_OPTIONS"
     fi
