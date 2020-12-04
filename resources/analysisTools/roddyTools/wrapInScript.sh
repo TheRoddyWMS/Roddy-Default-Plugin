@@ -277,6 +277,13 @@ killChildProcesses() {
   fi
 }
 
+userInGroup() {
+  local group="${1:?No group given}"
+  local user="${2:-$USER}"
+  id -nGz "$user" | grep -qzxF "$group"
+  return $?
+}
+
 ###### Main ############################################################################################################
 
 [[ ${PARAMETER_FILE-false} == false ]] && echo "The parameter PARAMETER_FILE is not set but is mandatory!" && exit 200
@@ -298,21 +305,28 @@ source ${PARAMETER_FILE} || throw 200 "Error sourcing $PARAMETER_FILE"
 dumpPaths "Files in environment after source configs" >> ${extendedLogFile}
 env >> ${extendedLogFile}
 
-if [[ ${outputFileGroup-false} != false && ${newGrpIsCalled-false} == false ]]; then
+outputFileGroup="${outputFileGroup:-false}"
+if [[ ("$outputFileGroup" != "false" && $outputFileGroup != "" && "${newGrpIsCalled:-false}" == "false" ]]; then
   export newGrpIsCalled=true
 
   if [[ -v LD_LIBRARY_PATH ]]; then
     export LD_LIB_PATH="$LD_LIBRARY_PATH"
   fi
-  # OK so something to note for you. newgrp has an undocumented feature (at least in the manpages)
-  # and resets the LD_LIBRARY_PATH to "" if you do -c. -l would work, but is not feasible, as you
-  # cannot call a script with it. Also I do not know whether it is possible to use it in a non-
-  # interactive session (like qsub). So we just export the variable and import it later on, if it
+  # OK so something to note for you. newgrp has an undocumented feature (at least not in the manpages)
+  # and resets the LD_LIBRARY_PATH to "" if you do -c. -l would work, but is not feasible, because you
+  # cannot call a script with it. Also, I do not know whether it is possible to use it in a non-
+  # interactive sessions (like qsub). So we just export the variable and import it later on, if it
   # was set earlier.
   # Funny things can happen... instead of newgrp we now use sg.
-  # newgrp is part of several packages and behaves differently
-  sg $outputFileGroup -c "/bin/bash $0"
-  exit $?
+  # newgrp is part of several packages and behaves differently.
+  if ! userInGroup "$outputFileGroup"; then
+    echo "You are not member of group '$outputFileGroup'! Set 'outputFileGroup' to a valid group or don't set it at all." \
+      >> /dev/stderr
+    exit 1
+  else
+    sg $outputFileGroup -c "/bin/bash $0"
+    exit $?
+  fi
 
 else
 
