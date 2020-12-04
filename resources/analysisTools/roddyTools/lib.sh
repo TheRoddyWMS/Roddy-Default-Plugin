@@ -4,6 +4,7 @@
 # Distributed under the MIT License (license terms are at https://github.com/DKFZ-ODCF/AlignmentAndQCWorkflows).
 #
 
+DEFAULTPLUGIN_LIB___ERREXIT=$(if [[ $SHELLOPTS =~ "errexit" ]]; then echo "errexit"; fi)
 DEFAULTPLUGIN_LIB___SHELL_OPTIONS=$(set +o)
 set +o verbose
 set +o xtrace
@@ -47,3 +48,6 @@ setCompressionToolsBasedOnFileCompression() {
 
 
 eval "$DEFAULTPLUGIN_LIB___SHELL_OPTIONS"
+if [[ "$DEFAULTPLUGIN_LIB___ERREXIT" == "errexit" ]]; then
+    set -e
+fi
