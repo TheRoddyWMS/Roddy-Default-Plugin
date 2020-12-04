@@ -4,6 +4,7 @@
 # Distributed under the MIT License (license terms are at https://github.com/DKFZ-ODCF/AlignmentAndQCWorkflows).
 #
 
+# errexit is stored here and restored below separately, because this was necessary for the Bash version used (4.2.46(2))
 DEFAULTPLUGIN_LIB___ERREXIT=$(if [[ $SHELLOPTS =~ "errexit" ]]; then echo "errexit"; fi)
 DEFAULTPLUGIN_LIB___SHELL_OPTIONS=$(set +o)
 set +o verbose

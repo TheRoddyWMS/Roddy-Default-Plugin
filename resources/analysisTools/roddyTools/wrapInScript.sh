@@ -166,7 +166,7 @@ getEnvironmentScriptPath() {
         # The environment variable directly refers to a path. Use the path!
         local scriptPath="$varValue"
     elif (echo "$varValue" | grep -P '^\${TOOL_'); then
-        # The environment variable points points to a TOOL_ variable name as derived from the XML tool name.
+        # The environment variable points to a TOOL_ variable name as derived from the XML tool name.
         local scriptPath="$varValue"
     else
         # The environment variable is the name of a tool as found in the XML.
@@ -191,11 +191,11 @@ warnEnvironmentScriptOverride() {
 # Given the name of an environment script variable, such as "workflowEnvironmentScript" or "gcBiasCorrectionEnvironmentScript", as usually declared
 # in the XML, declare the ENVIRONMENT_SCRIPT variable.
 declareEnvironmentScript() {
-    local envScriptVar="${1:-No environment script variable name given}"
-	  warnEnvironmentScriptOverride
-	  local tmp
-	  tmp=$(getEnvironmentScriptPath "$envScriptVar")
-    declare_xg ENVIRONMENT_SCRIPT "$tmp"
+  local envScriptVar="${1:-No environment script variable name given}"
+  warnEnvironmentScriptOverride
+  local tmp
+  tmp=$(getEnvironmentScriptPath "$envScriptVar")
+  declare_xg ENVIRONMENT_SCRIPT "$tmp"
 }
 
 # Basic modules / environment support
@@ -239,7 +239,7 @@ sourceBaseEnvironmentScript() {
         if [[ ! -r "$baseEnvironmentScript" ]]; then
             throw 200 "Cannot access baseEnvironmentScript: '$baseEnvironmentScript'"
         fi
-        # errorexit was not rescued by eval $(set +o). There rescue it explicitly.
+        # errorexit was not rescued by eval $(set +o). Therefore, rescue it explicitly.
         local sourceBaseEnvironment___ERREXIT=$(if [[ $SHELLOPTS =~ "errexit" ]]; then echo "errexit"; fi)
         local sourceBaseEnvironment_SHELL_OPTIONS=$(set +o)
         set +uvex    # Need to be unset because the scripts may be out of control of the person executing the workflow.
@@ -255,7 +255,7 @@ sourceBaseEnvironmentScript() {
 childProcesses() {
     # Note that the terminal sed in the following expression is necessary, because pstree seems to behave differently in interactive and non-
     # interactive mode. In non-interactive mode, pstree appends a '...' to every non-terminal process ID.
-    declare -a pidList=( $(pstree -a -p $$ | cut -d, -f2 | cut -d" " -f1 | grep -v $$ | sed -r 's/\.*//g') )
+    declare -a pidList=( $(pstree -a -p $$ | cut -d, -f2 | cut -d " " -f1 | grep -v $$ | sed -r 's/\.*//g') )
 
     ## To get a clean list of subprocesses we remove the PIDs of the cut, grep, and sed commands and that of the current subshell.
     for pid in "${pidList[@]}"; do
@@ -289,12 +289,16 @@ killChildProcesses() {
   fi
 }
 
-# Return 0, if user is in group, otherwise != 0.
+# Echo true, if user is in group, otherwise echo false.
 userInGroup() {
   local group="${1:?No group given}"
   local user="${2:-$USER}"
   id -nGz "$user" | grep -qzxF "$group"
-  return $?
+  if [[ $? -eq 0 ]]; then
+    echo true
+  else
+    echo false
+  fi
 }
 
 ###### Main ############################################################################################################
@@ -332,7 +336,7 @@ if [[ "$outputFileGroup" != "false" && $outputFileGroup != "" && "${sgWasCalled:
   # was set earlier.
   # Funny things can happen... instead of newgrp we now use sg.
   # newgrp is part of several packages and behaves differently.
-  if ! userInGroup "$outputFileGroup"; then
+  if [[ $(userInGroup "$outputFileGroup") == "false" ]]; then
     # Without this test `sg` in the alternative branch fails with exit code 1 and an error message of limited use.
     echo "You are not member of group '$outputFileGroup'! Set 'outputFileGroup' to a valid group or don't set it at all." \
       >> /dev/stderr
@@ -373,11 +377,11 @@ else
   # Check
   _lock="$jobStateLogFile~"
 
-  if [[ -n `which lockfile` ]]; then
+  if [[ -n $(which lockfile) ]]; then
     echo "Using 'lockfile' command for locking"
     lockCommand="lockfile -s 1 -r 50"
     unlockCommand="rm -f"
-  elif [[ -n `which lockfile-create` && -n `which lockfile-remove` ]]; then
+  elif [[ -n $(which lockfile-create) && -n $(which lockfile-remove) ]]; then
     echo "Set lockfile commands to lockfile-create and lockfile-remove"
     lockCommand=lockfile-create
     unlockCommand=lockfile-remove
