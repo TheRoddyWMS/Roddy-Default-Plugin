@@ -156,15 +156,22 @@ declare_xg() {
 # path this reference points to. Otherwise, assume the name refers to a tool name. Then determine the tool variable name (TOOL_...) and get the path
 # referenced. This make it possible to refer to an environment script as a tool either using the ${TOOL_...} form or the raw tool name. For instance:
 #
-# workflowEnvironmentScript=${TOOL_GC_BIAS_CORRECTION} => $TOOL_GC_BIAS_CORRECTION
-# workflowEnvironmentScript=gcBiasCorrections => $TOOL_GC_BIAS_CORRECTION
+# workflowEnvironmentScript=/path/to/script => /path/to/script
+# workflowEnvironmentScript=${TOOL_GC_BIAS_CORRECTION_ENVIRONMENT} => $TOOL_GC_BIAS_CORRECTION_ENVIRONMENT
+# workflowEnvironmentScript=gcBiasCorrectionsEnvironment => $TOOL_GC_BIAS_CORRECTION_ENVIRONMENT
 getEnvironmentScriptPath() {
     local varName="${1:?No variable name given}"
-    if (echo "${!varName}" | grep -P '^\${'); then
-        local scriptPath="${!varName}"
+    local varValue="${!varName}"
+    if (echo "$varValue" | grep -P "/"); then
+        # The environment variable directly refers to a path. Use the path!
+        local scriptPath="$varValue"
+    elif (echo "$varValue" | grep -P '^\${TOOL_'); then
+        # The environment variable points to a TOOL_ variable name as derived from the XML tool name.
+        local scriptPath="$varValue"
     else
+        # The environment variable is the name of a tool as found in the XML.
         local tmp
-        tmp=$(createToolVariableName "${!varName}")
+        tmp=$(createToolVariableName "$varValue")
         local transformedName="$tmp"
         local scriptPath="${!transformedName}"
     fi
@@ -184,17 +191,17 @@ warnEnvironmentScriptOverride() {
 # Given the name of an environment script variable, such as "workflowEnvironmentScript" or "gcBiasCorrectionEnvironmentScript", as usually declared
 # in the XML, declare the ENVIRONMENT_SCRIPT variable.
 declareEnvironmentScript() {
-    local envScriptVar="${1:-No environment script variable name given}"
-	warnEnvironmentScriptOverride
-	local tmp
-	tmp=$(getEnvironmentScriptPath "$envScriptVar")
-    declare_xg ENVIRONMENT_SCRIPT "$tmp"
+  local envScriptVar="${1:-No environment script variable name given}"
+  warnEnvironmentScriptOverride
+  local tmp
+  tmp=$(getEnvironmentScriptPath "$envScriptVar")
+  declare_xg ENVIRONMENT_SCRIPT "$tmp"
 }
 
 # Basic modules / environment support
 # Load the environment script (source), if it is defined. If the file is defined but the file not accessible exit with
 # code 200. Additionally, expose the used environment script path as ENVIRONMENT_SCRIPT variable to the wrapped script.
-runEnvironmentSetupScript() {
+sourceEnvironmentSetupScript() {
     local envScriptVar="${TOOL_ID}EnvironmentScript"
     if [[ -n "${!envScriptVar:-}" ]]; then
         declareEnvironmentScript "$envScriptVar"
@@ -226,16 +233,21 @@ setupRoddyScratch() {
     echo "RODDY_SCRATCH is set to ${RODDY_SCRATCH}"
 }
 
-# Source the script pointed to be the baseEnvironmentScript variable.
+# Source the script pointed to by the baseEnvironmentScript variable.
 sourceBaseEnvironmentScript() {
     if [[ -v baseEnvironmentScript && -n "$baseEnvironmentScript" ]]; then
         if [[ ! -r "$baseEnvironmentScript" ]]; then
             throw 200 "Cannot access baseEnvironmentScript: '$baseEnvironmentScript'"
         fi
+        # errorexit was not rescued by eval $(set +o). Therefore, rescue it explicitly.
+        local sourceBaseEnvironment___ERREXIT=$(if [[ $SHELLOPTS =~ "errexit" ]]; then echo "errexit"; fi)
         local sourceBaseEnvironment_SHELL_OPTIONS=$(set +o)
         set +uvex    # Need to be unset because the scripts may be out of control of the person executing the workflow.
         source "$baseEnvironmentScript"
         eval "$sourceBaseEnvironment_SHELL_OPTIONS"
+        if [[ "$sourceBaseEnvironment___ERREXIT" == "errexit" ]]; then
+            set -e
+        fi
     fi
 }
 
@@ -243,7 +255,7 @@ sourceBaseEnvironmentScript() {
 childProcesses() {
     # Note that the terminal sed in the following expression is necessary, because pstree seems to behave differently in interactive and non-
     # interactive mode. In non-interactive mode, pstree appends a '...' to every non-terminal process ID.
-    declare -a pidList=( $(pstree -a -p $$ | cut -d, -f2 | cut -d" " -f1 | grep -v $$ | sed -r 's/\.*//g') )
+    declare -a pidList=( $(pstree -a -p $$ | cut -d, -f2 | cut -d " " -f1 | grep -v $$ | sed -r 's/\.*//g') )
 
     ## To get a clean list of subprocesses we remove the PIDs of the cut, grep, and sed commands and that of the current subshell.
     for pid in "${pidList[@]}"; do
@@ -277,6 +289,18 @@ killChildProcesses() {
   fi
 }
 
+# Echo true, if user is in group, otherwise echo false.
+userInGroup() {
+  local group="${1:?No group given}"
+  local user="${2:-$USER}"
+  id -nGz "$user" | grep -qzxF "$group"
+  if [[ $? -eq 0 ]]; then
+    echo true
+  else
+    echo false
+  fi
+}
+
 ###### Main ############################################################################################################
 
 [[ ${PARAMETER_FILE-false} == false ]] && echo "The parameter PARAMETER_FILE is not set but is mandatory!" && exit 200
@@ -298,28 +322,36 @@ source ${PARAMETER_FILE} || throw 200 "Error sourcing $PARAMETER_FILE"
 dumpPaths "Files in environment after source configs" >> ${extendedLogFile}
 env >> ${extendedLogFile}
 
-if [[ ${outputFileGroup-false} != false && ${newGrpIsCalled-false} == false ]]; then
-  export newGrpIsCalled=true
+outputFileGroup="${outputFileGroup:-false}"
+if [[ "$outputFileGroup" != "false" && $outputFileGroup != "" && "${sgWasCalled:-false}" == "false" ]]; then
+  export sgWasCalled=true
 
   if [[ -v LD_LIBRARY_PATH ]]; then
     export LD_LIB_PATH="$LD_LIBRARY_PATH"
   fi
-  # OK so something to note for you. newgrp has an undocumented feature (at least in the manpages)
-  # and resets the LD_LIBRARY_PATH to "" if you do -c. -l would work, but is not feasible, as you
-  # cannot call a script with it. Also I do not know whether it is possible to use it in a non-
-  # interactive session (like qsub). So we just export the variable and import it later on, if it
+  # OK so something to note for you. newgrp has an undocumented feature (at least not in the manpages)
+  # and resets the LD_LIBRARY_PATH to "" if you do -c. -l would work, but is not feasible, because you
+  # cannot call a script with it. Also, I do not know whether it is possible to use it in a non-
+  # interactive sessions (like qsub). So we just export the variable and import it later on, if it
   # was set earlier.
   # Funny things can happen... instead of newgrp we now use sg.
-  # newgrp is part of several packages and behaves differently
-  sg $outputFileGroup -c "/bin/bash $0"
-  exit $?
+  # newgrp is part of several packages and behaves differently.
+  if [[ $(userInGroup "$outputFileGroup") == "false" ]]; then
+    # Without this test `sg` in the alternative branch fails with exit code 1 and an error message of limited use.
+    echo "You are not member of group '$outputFileGroup'! Set 'outputFileGroup' to a valid group or don't set it at all." \
+      >> /dev/stderr
+    exit 1
+  else
+    sg $outputFileGroup -c "/bin/bash $0"
+    exit $?
+  fi
 
 else
 
-  # Set LD_LIBRARY_PATH to LD_LIB_PATH, if the script was called recursively.
-  [[ ${LD_LIB_PATH-false} != false ]] && export LD_LIBRARY_PATH=$LD_LIB_PATH
+  # Set LD_LIBRARY_PATH to LD_LIB_PATH. This happens if the script was called recursively.
+  [[ ${LD_LIB_PATH:-false} != false ]] && export LD_LIBRARY_PATH=$LD_LIB_PATH
 
-  runEnvironmentSetupScript
+  sourceEnvironmentSetupScript
 
   dumpPaths "Files in environment after sourcing the environment script" >> ${extendedLogFile}
   env >> ${extendedLogFile}
@@ -345,16 +377,17 @@ else
   # Check
   _lock="$jobStateLogFile~"
 
-  if [[ -z `which lockfile` ]]; then
+  if [[ -n $(which lockfile) ]]; then
+    echo "Using 'lockfile' command for locking"
+    lockCommand="lockfile -s 1 -r 50"
+    unlockCommand="rm -f"
+  elif [[ -n $(which lockfile-create) && -n $(which lockfile-remove) ]]; then
     echo "Set lockfile commands to lockfile-create and lockfile-remove"
-    useLockfile=false
     lockCommand=lockfile-create
     unlockCommand=lockfile-remove
   else
-    echo "Using 'lockfile' command for locking"
-    useLockfile=true
-    lockCommand="lockfile -s 1 -r 50"
-    unlockCommand="rm -f"
+    echo "No file locking available. Won't continue"
+    exit 1
   fi
 
   startCode=STARTED

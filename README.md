@@ -15,7 +15,7 @@ The wrapper script has the following general structure
   - setup
   - source `baseEnvironmentScript` (e.g. `/etc/profile`)
   - source the job parameter file (`PARAMETER_FILE`)
-  - optionally, if `outputFileGroup` != "false", change to the requested group with `sg` and restart at setup (above)
+  - optionally, if `outputFileGroup` != "false", change to the requested group with `sg` and restart the script at the "setup" step (above)
   - source job-specific environment script (see "Environment Setup Support" below)
   - setup scratch directory
   - update the `jobStateLogfile.txt` using a lock-file
@@ -26,36 +26,61 @@ The wrapper script has the following general structure
 
 ## Environment Setup Support
 
-The job is started with the default environment configured for your job submission system.
+### Base Environment Script
 
-The `baseEnvironmentScript` serves as kind of general configuration of your cluster environment. Usually it sources something like 
-`/etc/profile` or `$HOME/.profile` or `$HOME/.bashrc`. Note that the `baseEnvironmentScript` variable is taken from Roddy's 
-`applicationProperties.ini`, not from the XML configuration files.
+Each job is started with the default environment configured in you `applicationProperties.ini` in the `baseEnvironmentScript` variable. The `baseEnvironmentScript` serves as kind of general configuration of your cluster environment. Usually you will use a script like `/etc/profile` or `$HOME/.profile` or `$HOME/.bashrc`. 
 
-After that the wrapper script checks whether you have a dedicated environment script defined for the whole workflow or the specific
-cluster job. This is defined by variables defined in one of the configuration XMLs or on the commandline via the `--cvalues` parameter.
+Note that often the `baseEnvironmentScript` is not under your control and may be sensitive for certain environment options, such as `set -e` or `set -u`. Therefore, error checks and logging options, which are turned on in the `wrapInScript.sh` if you set `debugWrapInScript=true`, will be turned off while reading the base environment. 
 
-To define a plugin-level environment setup script, you can add lines like the following to your XMLs:
+### Workflow- and Job-Environment Scripts
+
+After the base environment script and after the job-parameter file were sourced, the wrapper script checks whether you have a dedicated environment script defined for the whole workflow or this specific cluster job. These environment scripts defined in one of the configuration XMLs or on the commandline via the `--cvalues` parameter.
+
+The "workflow-environment" script defines the environment for all jobs of the workflow. By contrast, "job-environment" scripts define the environment for individual jobs and take precedence over the workflow-environments.
+
+To define a workflow-level environment setup script, you can add lines like the following to your XMLs:
 
 ```xml
-<cvalue name="workflowEnvironmentScript" value="${TOOL_WORKFLOW_ENVIRONMENT_CONDA}" type="string"
-              description="Use ${TOOL_WORKFLOW_ENVIRONMENT_CONDA} for a generic Conda environment."/>
+<configurationvalues>
+  <cvalue name="workflowEnvironmentScript" value="workflowEnvironment_conda" type="string"
+          description="Use 'workflowEnvironment_conda' for a generic Conda environment."/>
+</configurationvalues>
 <processingTools>
-   <tool name="workflowEnvironment_conda" value="conda.sh" basepath="workflowName/environments"/>
+   <tool name="workflowEnvironment_conda" value="conda.sh" basepath="environments"/>
+   <tool name="workflowEnvironment_lsf" value="lsf.sh" basepath="environments"/>
 </processingTools>
 ```
 
-This will declare the file `resources/workflowName/environments/conda.sh` to be used as workflow setup script for all jobs. Like all Roddy "tools" such environment scripts need to be executable.
+This will declare two environment scripts and select the "workflowEnvironment_conda" as the environment to use. The user can still select `lsf.sh` as workflow environment by defining  e.g. `--cvalue="workflowEnvironmentScript:workflowEnvironment_lsf"` on the command line. In this example, environment scripts need to be located in the `resources/environments` directory in the plugin, which is copied to the execution host.
 
-Notice the reference to a "TOOL" variable in the `cvalue`. Each environment script is represented in Roddy as a "tool" that has a name, e.g. "myProcessingStepEnv". All tool names, which are conventionally in "camel-case", are exposed to the cluster job environment in a translated form. The tool name is translated in 3 steps by 
+You may want to specify dedicated job-environment scripts for individual cluster jobs. These take precedence over the global workflow environment script. For instance, the following defines a tool as environment script for the `correctGcBias` cluster job (which is also defined as tool).
 
+```xml
+<configurationvalues>
+    <cvalue name="correctGcBiasEnvironmentScript" value="${TOOL_CORRECT_GC_BIAS_ENVIRONMENT_CONDA}" type="string"/>
+</configurationvalues>
+<processingTools>
+  <tool name="correctGcBiasEnvironment_conda" value="conda-correctGcBias.sh" basepath="environments"/>
+</processingTools>
+``` 
+
+Internally, the tool names are mapped to a `TOOL_` bash variable according to the following rules:
   - inserting an underscore '\_' before all capitals, 
   - changing all letters to upper-case, and 
   - prepending "TOOL\_" before the name.
   
-Thus "myProcessingStepEnv" becomes "TOOL_MY_PROCESSING_STEP_ENV". The "workflowEnvironment_conda" tool from the previous example is translated to "TOOL_WORKFLOW_ENVIRONMENT_CONDA" and points to the `workflowName/environments/conda.sh` _with the path available for the cluster job on the remote system after Roddy has copied the scripts_. This base-path may be different for every run and therefore in the XML the tool is only specified with a `basepath` attribute-value relative to the `resources` directory in the plugin.
+It is also possible, to refer to the tool by using a configuration value of the form `${TOOL_WORKFLOW_ENVIRONMENT_CONDA}`. This form is occasionally used in existing plugins, but we advise you to use the first simpler form.
 
-Note that because the environment script is simply `source`'d you can access variables from the parameter-file (`PARAMETER_FILE`, sourced before; see above) from within that script. For instance, you may want to also specify the conda environment name in the XML:
+Sometimes having to modify the plugin in place is not possible or desirable, in particular during development. In this case, you can also specify the environment script directly in the configuration value like in "/path/to/develEnv.sh". This path should be absolute and must be available on the execution host. This possibility is only available since version 1.2.2-5 of this plugin.
+ 
+The logic to discriminate between these three cases is as follows:
+  - the value contains a '/': this is a direct path. This only works since version 1.2.2-5.
+  - the value starts with '${': this is a TOOL_ path. Since version 1.2.2-5 the matching is on `${TOOL_}`.
+  - compose the the `TOOL_` variable name from the job-name, like described above.
+
+### Environment Parametrization
+
+The environment script is simply `source`'d, so you can access variables from the parameter-file (`PARAMETER_FILE`, sourced before; see above) from within that script. For instance, you have a `conda.sh` that activates a Conda environment, but you want to keep the environment name configurable. You can then the conda environment name in the XML:
 
 ```xml
 <cvalue name="condaEnvironmentName" value="myWorkflow" type="string"
@@ -68,32 +93,21 @@ Then your `conda.sh` may look like this:
 source activate "$condaEnvironmentName"
 ```
 
-Additionally, you can specify dedicated scripts for cluster jobs. For instance, the following defines a tool as environment script for the `correctGcBias` cluster job (which is also defined as tool).
-
-```xml
-<cvalue name="correctGcBiasEnvironmentScript" value="${TOOL_CORRECT_GC_BIAS_ENVIRONMENT_CONDA}" type="string"/>
-<processingTools>
-  <tool name="correctGcBiasEnvironment_conda" value="conda-correctGcBias.sh" basepath="workflowName/environments"/>
-</processingTools>
-``` 
-
-Cluster-job specific environments take precedence over plugin-level environments. Thus you can define a default for your plugin and a modified environment for a specific job.
-
 ### Exporting Variables from the Environment Script
 
 The environment setup scripts are mostly useful for setting up environment variables that can be used in the wrapped script, which does the actual job for you.
 
 To achieve this Bash variables need to be exported with the `export` declaration. 
 
-Bash functions can also get exported with `export -f`.
+Sometimes it can be useful to define a Bash function in the environment script, for use in the wrapper. These Bash functions can get exported with `export -f`. An example is a wrapper function for a tool with a complex call which you want to wrap for better readability in your workflow code.
 
-Note that due to the mentioned bug in Bash with exported array variables, something like `export -a` won't work, unless you use a very recent Bash version. We suggest here to take the same strategy as the `PARAMETER_FILE` does, namely to export them as quoted Bash array string
+Note that due to a bug in Bash with exported array variables in Bash <4.4, something like `export -a` won't work. We suggest here to take the same strategy as the `PARAMETER_FILE` does, namely to export them as quoted Bash array string
 
 ```bash
 export arrayStringVar="(a b c d)"
 ```
 
-and then cast them into Bash arrays in your wrapped script with
+and then cast this string into a Bash arrays in your wrapped script with
 
 ```bash
 declare -a arrayVar="$arrayStringVar"
@@ -103,15 +117,15 @@ declare -a arrayVar="$arrayStringVar"
   
 The `debugWrapInScript` variable -- defaulting to `false` -- turns on the `set +xv` verbosity shell options. 
   
-The `baseEnvironmentScript` is sourced with relaxed values for `set`, i.e. with `set +ue`, because often files like `/etc/profile` are not under the control of the person running the workflow. Changes to the `set` options in the `baseEnvironmentScript` are not inherited by subsequent code in the  `wrapInScript.sh`.
+The `baseEnvironmentScript` is sourced with relaxed values for `set`, i.e. with `set +ue`, because often files like `/etc/profile` are not under the control of the person running the workflow. Conversely, changes to the `set` options in the `baseEnvironmentScript` are not inherited by subsequent code in the  `wrapInScript.sh`.
 
 The environment script has the same values for the shell options set via `set` in Bash, as the wrapper. In particular this means that `errexit` is set. Changes in the environment script *are* inherited by subsequent code in the `wrapInScript.sh`.
   
-It is possible to run the same command that Roddy runs as remote job from the interactive command line. The wrapper script recognizes that it is run in an interactive session and avoids an exitting of the Bash upon errors (i.e. `set +e` is set) but should otherwise behave exactly as if run by `bsub` or `qsub`.
+It is possible to run the same command that Roddy runs as remote job from the interactive command line. The wrapper script recognizes that it is run in an interactive session and avoids an exiting of the Bash upon errors (i.e. `set +e` is set) but should otherwise behave exactly as if run by `bsub` or `qsub`.
 
-Finally the wrapped script has debugging options `WRAPPED_SCRIPT_DEBUG_OPTIONS`. For convenience, the application of these options can be turned off by the `disableDebugOptionsForToolscript`.
+Finally, the wrapped script has debugging options `WRAPPED_SCRIPT_DEBUG_OPTIONS`. For convenience, the application of these options can be turned off by the `disableDebugOptionsForToolscript`.
 
-### Execution
+### Wrapped-Script Execution
 
 As stated previously, the wrapped script is executed by Bash. This means you can use a shebang-line to select an arbitrary interpreter, e.g. one you have pulled into the environment via the `baseEnvironmentScript` or the workflow- or job-specific environments scripts.
   
@@ -126,11 +140,17 @@ The following conventions are nothing more than that and are currently not enfor
 
 ## Changelog
 
+* 1.2.2-5
+
+  - Turn off debugging options when sourcing environment files. This allows using environment scripts that fail because of `set -u`).
+  - Refactored lockfile code in `wrapInScript.sh`
+  - Report if user is not member of `outputFileGroup`.
+  - Allow defining environment scripts outside the plugin `resources/` directory.
+
 * 1.2.2-4
 
   - `buildversion.txt` did not correctly reflect the version 1.2.2
-  - Turn off debugging options when sourcing environment files
-  - Refactored lockfile code in `wrapInScript.sh`
+  - allow for /ad hoc/ custom environment scripts 
 
 * 1.2.2-3
 
