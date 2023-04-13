@@ -7,6 +7,7 @@
 
 set -e
 set -o pipefail
+# TODO Starting with Bash 4.4+ add `shopt -o inherit_errexit`
 
 exec 1>&2
 
@@ -19,6 +20,7 @@ else
     exit 200
 fi
 
+###### Library #########################################################################################################
 bashMajorVersion() {
     echo $BASH_VERSION | cut -f 1 -d.
 }
@@ -95,10 +97,12 @@ export -f exitIfNonInteractive
 
 ## throw [code [msg]]
 ## Write message (Unspecified error) to STDERR and exit with code (default 1)
+UNSPECIFIED_ERROR_CODE=101
+UNSPECIFIED_ERROR_MSG="Runtime error"
 throw () {
   local lastCommandsExitCode=$?
-  local exitCode="${1-$UNSPECIFIED_ERROR_CODE}"
-  local msg="${2-$UNSPECIFIED_ERROR_MSG}"
+  local exitCode="${1:-$UNSPECIFIED_ERROR_CODE}"
+  local msg="${2:-$UNSPECIFIED_ERROR_MSG}"
   if [[ $lastCommandsExitCode -ne 0 ]]; then
     msg="$msg (last exit code: $lastCommandsExitCode)"
   fi
@@ -130,7 +134,7 @@ dumpPaths() {
     local DUMP_PATHS___SHELL_OPTIONS
     DUMP_PATHS___SHELL_OPTIONS=$(set +o)
     set +xv
-    while IFS='=' read -r -d '' n v; do [[ -r $v ]] && echo "$v -> "$(readlink -f "$v"); done < <(env -0)
+    while IFS='=' read -r -d '' n v; do [[ -r $v ]] && echo "$v -> $(readlink -f "$v")"; done < <(env -0)
     if [[ ${debugWrapInScript-false} == true ]]; then set -xv; fi
     eval "$DUMP_PATHS___SHELL_OPTIONS"
     echo ""
@@ -140,7 +144,7 @@ dumpPaths() {
 # For instance: gcBiasCorrection => TOOL_GC_BIAS_CORRECTION.
 createToolVariableName() {
     local varName="${1:?No variable name given}"
-    local _tmp
+    local tmp
     tmp=$(echo "$varName" | perl -ne 's/([A-Z])/_$1/g; print uc($_)')
     echo "TOOL_$tmp"
 }
@@ -240,8 +244,10 @@ sourceBaseEnvironmentScript() {
             throw 200 "Cannot access baseEnvironmentScript: '$baseEnvironmentScript'"
         fi
         # errorexit was not rescued by eval $(set +o). Therefore, rescue it explicitly.
-        local sourceBaseEnvironment___ERREXIT=$(if [[ $SHELLOPTS =~ "errexit" ]]; then echo "errexit"; fi)
-        local sourceBaseEnvironment_SHELL_OPTIONS=$(set +o)
+        local sourceBaseEnvironment___ERREXIT
+        sourceBaseEnvironment___ERREXIT=$(if [[ $SHELLOPTS =~ "errexit" ]]; then echo "errexit"; fi)
+        local sourceBaseEnvironment_SHELL_OPTIONS
+        sourceBaseEnvironment_SHELL_OPTIONS=$(set +o)
         set +uvex    # Need to be unset because the scripts may be out of control of the person executing the workflow.
         source "$baseEnvironmentScript"
         eval "$sourceBaseEnvironment_SHELL_OPTIONS"
@@ -270,7 +276,7 @@ childProcesses() {
 processesExist() {
     declare -a pids=( "$@" )
     if [[ ${#pids[@]} -eq 0 ]]; then
-        throw 100 "No process IDs given"
+        throw 101 "No process IDs given"
     fi
     ps --no-header --pid "${pid[@]}" > /dev/null
 }
@@ -301,9 +307,82 @@ userInGroup() {
   fi
 }
 
-###### Main ############################################################################################################
 
-[[ ${PARAMETER_FILE-false} == false ]] && echo "The parameter PARAMETER_FILE is not set but is mandatory!" && exit 200
+# Get the real-path of an existing directory. Die, if the directory does not exist.
+normDir() {
+  local dir
+  dir="${1:?No dir provided}"
+  local rdir
+  rdir="$(readlink -m "$dir")"
+  if [[ "$rdir" == "" || ! -x "$rdir" ]]; then
+    throw 200 "Resolving '$dir' results in non-executable directory '$rdir'"
+  else
+    echo "$rdir"
+  fi
+}
+
+
+# For a set of directories provided as arguments, map them to the real-paths and deduplicate list.
+uniqueRealDirs() {
+  declare -a dirs
+  dirs=("$@")
+  local d
+  # This is fragile Bash code, because of the subshell!
+  (for d in "${dirs[@]}"; do normDir "$d"; done) | sort -u
+}
+
+
+# All directories, except the output directory are bound as read-only into the container.
+# This returns an string suitable for the apptainer -B option.
+# Note that if input and output directory are identical, the input directory will be specified
+# as read-writable, otherwise only as readable, to protect the input directory from modification.
+listBindOptions() {
+  local inputDir
+  local outputDir
+  local scratchBaseDir
+  declare -a dirs
+
+  inputDir="$(normDir "${1:?No inputDir provided}")"
+  outputDir="$(normDir "${2:?No outputDir provided}")"
+  scratchBaseDir="$(normDir "${3:?No scratchBaseDirectory provided}")"
+  shift 3
+  dirs=("$@")
+
+  local tempDir
+  tempDir="$(normDir "$TMPDIR")"
+
+  # TODO Compile all rw directories. Super-dir wins over sub-dir.
+  # TODO Compile all ro directories. rw wins over ro. Super-dir wins over sub-dir.
+
+  local bindDirs
+  if [[ "$inputDir" == "$outputDir" ]]; then
+    bindDirs="$outputDir:$outputDir:rw"
+  else
+    bindDirs="$inputDir:$inputDir:ro,$outputDir:$outputDir:rw"
+  fi
+
+  if [[ "$scratchBaseDir" == "$tempDir" ]]; then
+    bindDirs="$bindDirs,$scratchBaseDir:$scratchBaseDir:rw"
+  else
+    bindDirs="$bindDirs,$scratchBaseDir:$scratchBaseDir:rw,$tempDir:$tempDir:rw"
+  fi
+
+  local realDir
+  for realDir in $(uniqueRealDirs "${dirs[@]}"); do
+    if [[ "$realDir" != "$inputDir" && "$realDir" != "$outputDir" ]]; then
+      bindDirs="$bindDirs,$realDir:$realDir:ro"
+    fi
+  done
+
+  echo "$bindDirs"
+}
+
+
+###### Main ############################################################################################################
+if [[ ${PARAMETER_FILE:-false} == false ]]; then
+   echo "The parameter PARAMETER_FILE is not set but is mandatory!"
+   exit 200
+fi
 
 sourceBaseEnvironmentScript
 
@@ -323,9 +402,10 @@ dumpPaths "Files in environment after source configs" >> ${extendedLogFile}
 env >> ${extendedLogFile}
 
 outputFileGroup="${outputFileGroup:-false}"
-if [[ "$outputFileGroup" != "false" && $outputFileGroup != "" && "${sgWasCalled:-false}" == "false" ]]; then
-  export sgWasCalled=true
-
+primaryGroup="$(groups | cut -f 1 -d ' ')"
+if [[ "$outputFileGroup" != "false" && $outputFileGroup != "" && "$primaryGroup" != "$outputFileGroup" ]]; then
+  # First, switch the primary group to the outputFileGroup, if one is requested and not already the
+  # primary group.
   if [[ -v LD_LIBRARY_PATH ]]; then
     export LD_LIB_PATH="$LD_LIBRARY_PATH"
   fi
@@ -345,8 +425,8 @@ if [[ "$outputFileGroup" != "false" && $outputFileGroup != "" && "${sgWasCalled:
     sg $outputFileGroup -c "/bin/bash $0"
     exit $?
   fi
-
 else
+  # Finally, execute the top-level script for the analyses.
 
   # Set LD_LIBRARY_PATH to LD_LIB_PATH. This happens if the script was called recursively.
   [[ ${LD_LIB_PATH:-false} != false ]] && export LD_LIBRARY_PATH=$LD_LIB_PATH
@@ -429,8 +509,59 @@ else
 
   exitCode=0
   [[ ${disableDebugOptionsForToolscript-false} == true ]] && export WRAPPED_SCRIPT_DEBUG_OPTIONS=""
+
   echo "######################################################### Starting wrapped script ###########################################################"
-  $jobProfilerBinary bash ${WRAPPED_SCRIPT_DEBUG_OPTIONS-} ${WRAPPED_SCRIPT} || exitCode=$?
+  if [[ "${outerEnvironment:-host}" == "host" ]]; then
+    $jobProfilerBinary bash ${WRAPPED_SCRIPT_DEBUG_OPTIONS:-} $WRAPPED_SCRIPT || exitCode=$?
+  elif [[ "$outerEnvironment" == "apptainer" || "$outerEnvironment" == "singularity" ]]; then
+    # Singularity copies the current environment into the container. This means that important
+    # environment variables, even cluster-specific variables will be available in the container.
+    #
+    # (see https://apptainer.org/docs/user/latest/environment_and_metadata.html#environment-overview).
+    #
+    if [[ "$outerEnvironment" == "singularity" ]]; then
+      containerRuntime="$outerEnvironment"
+      if [[ "${containerExportPath:-false}" == "true" ]]; then
+        # Some variables, however, are *not* exported to singularity by default. Therefore ...
+        SINGULARITYENV_LD_LIBRARY_PATH="$LD_LIBRARY_PATH"
+        export SINGULARITYENV_LD_LIBRARY_PATH
+        SINGULARITYENV_PATH="$PATH"
+        export SINGULARITYENV_PATH
+      fi
+    else
+        containerRuntime="$outerEnvironment"
+        if [[ "${containerExportPath:-false}" == "true" ]]; then
+          # Some variables, however, are *not* exported to apptainer by default. Therefore ...
+          APPTAINERENV_LD_LIBRARY_PATH="$LD_LIBRARY_PATH"
+          export APPTAINERENV_LD_LIBRARY_PATH
+          APPTAINERENV_PATH="$PATH"
+          export APPTAINERENV_PATH
+        fi
+    fi
+
+    inputDir="$(normDir "${inputAnalysisBaseDirectory:?No inputAnalysisBaseDirectory provided}")"
+    outputDir="$(normDir "${outputAnalysisBaseDirectory:?No outputAnalysisBaseDirectory provided}")"
+    workingDir="$PWD"
+
+    # Note the quotes. The received variables are not arrays, because of a bug in Bash that hinders
+    # array variables to be exported. So we export (and import them here) as strings in array
+    # notation. containerMounts should be of the format `(mount1 mount2 mount3)`.
+    declare -a additionalMountDirs="$containerMounts"
+    bindOptions="$(listBindOptions "$inputDir" "$outputDir" "$scratchBaseDirectory" "${additionalMountDirs[@]}")"
+
+    # A path or identifier of a Singularity/Apptainer container.
+    container="${container:?No container provided}"
+
+    "$containerRuntime" run \
+      -W "$workingDir" \
+      -B "$bindOptions" \
+      "$container" \
+      $jobProfilerBinary bash ${WRAPPED_SCRIPT_DEBUG_OPTIONS:-} $WRAPPED_SCRIPT \
+      || exitCode=$?
+  else
+    echo "Invalid value for outerEnvironment: '$outerEnvironment'" >> /dev/stderr
+    exit 1
+  fi
   echo "######################################################### Wrapped script ended ##############################################################"
   echo "Exited script ${WRAPPED_SCRIPT} with value ${exitCode}"
 

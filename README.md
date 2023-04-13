@@ -19,7 +19,7 @@ The wrapper script has the following general structure
   - source job-specific environment script (see "Environment Setup Support" below)
   - setup scratch directory
   - update the `jobStateLogfile.txt` using a lock-file
-  - run the wrapped script using bash 
+  - run the wrapped script using bash or apptainer (dependent on `outerEnvironment=host` or `outerEnvironment=apptainer`)
   - kill child-process still running after the wrapped script ended
   - update the `jobStateLogfile.txt` with the job's exit code
   - exit
@@ -129,6 +129,22 @@ Finally, the wrapped script has debugging options `WRAPPED_SCRIPT_DEBUG_OPTIONS`
 
 As stated previously, the wrapped script is executed by Bash. This means you can use a shebang-line to select an arbitrary interpreter, e.g. one you have pulled into the environment via the `baseEnvironmentScript` or the workflow- or job-specific environments scripts.
   
+### Singularity/Apptainer
+
+The cluster jobs can be wrapped in an Singularity/Apptainer container. 
+
+Specifically, the wrapper script is normally started in the shell. As usually, it may decide to restart itself with the group that was specified in `outputFileGroup`.
+
+Usually the `WRAPPED_SCRIPT` is executed by Bash directly, but if `outerEnvironment` is "apptainer" (or "singularity"), then additionally, the executing Bash is wrapped by a call to `singularity` (currently, both options call the `singularity` binary). The working directory in the container is the same working directory that is used when executing the wrap-in script. Currently, only a single container can be specified with `container`.
+
+By default, the `inputAnalysisBaseDirectory` is mounted read-only, and the `outputAnalysisBaseDirectory` read-write. Remember that these directory paths are configurable and may be composed of different pieces of information (see `default.xml` in this plugin).  If both paths point to the same directory (after `readlink -f`!) then this directory is bound read-write into container.
+
+You may specify additional directories to be mounted read-only into the container, e.g. for reference data or a software stack. This is done with `containerMounts` set to a list of paths formatted as Bash array, i.e. `(path1 path2 path3 [etc.])`. Don't worry about duplicates in that list: The wrapper script normalizes all paths with `readlink -f`, fails on non-existing paths, and then de-duplicates the list.
+
+The same parameters as for execution in a Bash shell can be used also for executing in an apptainer container, e.g. `WRAPPED_SCRIPT_DEBUG_OPTIONS`.
+
+Note that it is possible to export also the `PATH` and `LD_LIBRARY_PATH` environment variables into the container. This is not done by default, but only if `containerExportPath` is set to `true`. Usually you only need this, 
+
 ### Conventions
 
 The following conventions are nothing more than that and are currently not enforced by Roddy:
@@ -140,9 +156,14 @@ The following conventions are nothing more than that and are currently not enfor
 
 ## Changelog
 
+* 1.3
+
+  - Minor: Add Apptainer/Singularity support.
+  - Minor: Changed some wrapper exit codes from 100 to 101, because 100 is reserved for SGE.
+
 * 1.2.2-5
 
-  - Turn off debugging options when sourcing environment files. This allows using environment scripts that fail because of `set -u`).
+  - Turn off debugging options when sourcing environment files. This allows using environment scripts that fail because of `set -u`). If your setup script needs `set -u` turn it on in your script.
   - Refactored lockfile code in `wrapInScript.sh`
   - Report if user is not member of `outputFileGroup`.
   - Allow defining environment scripts outside the plugin `resources/` directory.
@@ -165,7 +186,6 @@ The following conventions are nothing more than that and are currently not enfor
   - add `killBackgroundJobs` to deal with processes not killed by batch-processing system
   - set generic temporary variables (`TMP`, `TMPDIR`, `TEMP`) to scratch
   - set {input,output}AnalysisBaseDirectory defaults
-
 
 * 1.2.2-1
 
