@@ -228,13 +228,13 @@ sourceEnvironmentSetupScript() {
 setupRoddyScratch() {
     if [[ "${RODDY_SCRATCH:-}" == "" ]]; then
         throw 200 "Undefined RODDY_SCRATCH variable."
-    elif [[ ! -d ${RODDY_SCRATCH} ]]; then
-        mkdir -p ${RODDY_SCRATCH}
+    elif [[ ! -d "$RODDY_SCRATCH" ]]; then
+        mkdir -p "$RODDY_SCRATCH"
     fi
     if [[ ! -x "$RODDY_SCRATCH" && ! -r "$RODDY_SCRATCH" && ! -w "$RODDY_SCRATCH" ]]; then
         throw 200 "Cannot access RODDY_SCRATCH=$RODDY_SCRATCH, please check its access rights"
     fi
-    echo "RODDY_SCRATCH is set to ${RODDY_SCRATCH}"
+    echo "RODDY_SCRATCH is set to $RODDY_SCRATCH"
 }
 
 # Source the script pointed to by the baseEnvironmentScript variable.
@@ -243,7 +243,7 @@ sourceBaseEnvironmentScript() {
         if [[ ! -r "$baseEnvironmentScript" ]]; then
             throw 200 "Cannot access baseEnvironmentScript: '$baseEnvironmentScript'"
         fi
-        # errorexit was not rescued by eval $(set +o). Therefore, rescue it explicitly.
+        # errexit was not rescued by eval $(set +o). Therefore, rescue it explicitly.
         local sourceBaseEnvironment___ERREXIT
         sourceBaseEnvironment___ERREXIT=$(if [[ $SHELLOPTS =~ "errexit" ]]; then echo "errexit"; fi)
         local sourceBaseEnvironment_SHELL_OPTIONS
@@ -299,7 +299,11 @@ killChildProcesses() {
 userInGroup() {
   local group="${1:?No group given}"
   local user="${2:-$USER}"
-  id -nGz "$user" | grep -qzxF "$group"
+  # Extremely strange. Sometimes the `id ...` expression fails, although the same code works in
+  # parallel jobs on the cluster. However, it seems that a call to `groups` immediately before
+  # the call to `id` prevents (or reduces?) these occasional false-negatives.
+  groups
+  id -nGz "$user" | grep -zxF "$group" 1>&2
   if [[ $? -eq 0 ]]; then
     echo true
   else
@@ -339,12 +343,12 @@ uniqueRealDirs() {
 listBindOptions() {
   local inputDir
   local outputDir
-  local scratchBaseDir
+  local scratchDir
   declare -a dirs
 
   inputDir="$(normDir "${1:?No inputDir provided}")"
   outputDir="$(normDir "${2:?No outputDir provided}")"
-  scratchBaseDir="$(normDir "${3:?No scratchBaseDirectory provided}")"
+  scratchDir="$(normDir "${3:?No scratchDir provided}")"
   shift 3
   dirs=("$@")
 
@@ -361,10 +365,10 @@ listBindOptions() {
     bindDirs="$inputDir:$inputDir:ro,$outputDir:$outputDir:rw"
   fi
 
-  if [[ "$scratchBaseDir" == "$tempDir" ]]; then
-    bindDirs="$bindDirs,$scratchBaseDir:$scratchBaseDir:rw"
+  if [[ "$scratchDir" == "$tempDir" ]]; then
+    bindDirs="$bindDirs,$scratchDir:$scratchDir:rw"
   else
-    bindDirs="$bindDirs,$scratchBaseDir:$scratchBaseDir:rw,$tempDir:$tempDir:rw"
+    bindDirs="$bindDirs,$scratchDir:$scratchDir:rw,$tempDir:$tempDir:rw"
   fi
 
   local realDir
@@ -388,66 +392,105 @@ sourceBaseEnvironmentScript
 
 # Store the environment, store file locations in the env
 extendedLogsDir=$(dirname "$PARAMETER_FILE")/extendedLogs
-mkdir -p ${extendedLogsDir}
+mkdir -p "$extendedLogsDir"
 extendedLogFile=${extendedLogsDir}/$(basename "$PARAMETER_FILE" .parameters)
 
-dumpPaths "Files in environment before source configs" >> ${extendedLogFile}
-env >> ${extendedLogFile}
+dumpPaths "Files in environment before source configs" >> "$extendedLogFile"
+env >> "$extendedLogFile"
 
 ## First source the job's PARAMETER_FILE (.parameter) with all the global variables
 waitForFile "$PARAMETER_FILE"
-source ${PARAMETER_FILE} || throw 200 "Error sourcing $PARAMETER_FILE"
+source $PARAMETER_FILE || throw 200 "Error sourcing $PARAMETER_FILE"
 
-dumpPaths "Files in environment after source configs" >> ${extendedLogFile}
-env >> ${extendedLogFile}
+dumpPaths "Files in environment after source configs" >> "$extendedLogFile"
+env >> "$extendedLogFile"
 
-outputFileGroup="${outputFileGroup:-false}"
 primaryGroup="$(groups | cut -f 1 -d ' ')"
-if [[ "$outputFileGroup" != "false" && $outputFileGroup != "" && "$primaryGroup" != "$outputFileGroup" ]]; then
-  # First, switch the primary group to the outputFileGroup, if one is requested and not already the
-  # primary group.
+outputFileGroup="${outputFileGroup:-$primaryGroup}"
+if [[ "$primaryGroup" != "$outputFileGroup" ]]; then
+  # First, switch the primary group to the outputFileGroup, unless it is is the primary group.
+
+  # For a normal reload with another primary group, we want to rescue the LD_LIBRARY_PATH.
   if [[ -v LD_LIBRARY_PATH ]]; then
     export LD_LIB_PATH="$LD_LIBRARY_PATH"
   fi
-  # OK so something to note for you. newgrp has an undocumented feature (at least not in the manpages)
-  # and resets the LD_LIBRARY_PATH to "" if you do -c. -l would work, but is not feasible, because you
-  # cannot call a script with it. Also, I do not know whether it is possible to use it in a non-
-  # interactive sessions (like qsub). So we just export the variable and import it later on, if it
-  # was set earlier.
-  # Funny things can happen... instead of newgrp we now use sg.
-  # newgrp is part of several packages and behaves differently.
-  if [[ $(userInGroup "$outputFileGroup") == "false" ]]; then
-    # Without this test `sg` in the alternative branch fails with exit code 1 and an error message of limited use.
+
+  if [[ "$(userInGroup "$outputFileGroup")" == "false" ]]; then
+    # Without this test, `sg` in the alternative branch fails with exit code 1 and an error
+    # message of limited use.
     echo "You are not member of group '$outputFileGroup'! Set 'outputFileGroup' to a valid group or don't set it at all." \
       >> /dev/stderr
     exit 1
   else
+    # We use `sg`, not `newgrp`. `newgrp` seems to have multiple different implementations.
     sg $outputFileGroup -c "/bin/bash $0"
     exit $?
   fi
+
+elif [[ "$outerEnvironment" != "host" && "${isWrappedInContainer:-false}" == "false" ]]; then
+  # Second, reinvoke this wrapper with all parameters in a container. Thus the wrapper will set
+  # up all environment variables *within* the container, in particular the environment setup script,
+  # including the e.g. cluster module (see `sourceEnvironmentSetupScript` below).
+
+  if [[ "$outerEnvironment" == "apptainer" || "$outerEnvironment" == "singularity" ]]; then
+    containerRuntime="$outerEnvironment"
+    # Note: We do not copy the PATH or LD_LIBRARY_PATH variable into the container. If you want
+    # the container to be similar to the outer environment even for these variables, you should
+    # set these values within the container.
+    # We also unset the LD_LIB_PATH variable that we set before.
+    unset LD_LIB_PATH
+
+    inputDir="$(normDir "${inputAnalysisBaseDirectory:?No inputAnalysisBaseDirectory provided}")"
+    outputDir="$(normDir "${outputAnalysisBaseDirectory:?No outputAnalysisBaseDirectory provided}")"
+    workingDir="$PWD"
+
+    # containerMounts should be of the format `(mount1 mount2 mount3)`.
+    declare -a additionalMountDirs="$containerMounts"
+    bindOptions="$(listBindOptions "$inputDir" "$outputDir" "$RODDY_SCRATCH" "${additionalMountDirs[@]}")"
+
+    # A path or identifier of a Singularity/Apptainer container.
+    container="${container:?No container provided}"
+
+    # To avoid infinite recursion when self-invoking this wrapper, we need to mark the new
+    # environment in the container. We cannot reuse `outerEnvironment` because the wrapper in
+    # the container will override it (from the PARAMETER_FILE). Thus, we use a new variable.
+    export isWrappedInContainer="true"
+    "$containerRuntime" run \
+      -W "$workingDir" \
+      -B "$bindOptions" \
+      "$container" \
+      bash "$0"
+
+    exit $?
+  else
+    echo "Invalid value for outerEnvironment: '$outerEnvironment'" >> /dev/stderr
+    exit 1
+  fi
+
 else
-  # Finally, execute the top-level script for the analyses.
+  # Finally, unless the primary group differs from the outputFileGroup (if one is requested), and
+  # we have not yet invoked a wrapping container, we start with the real work.
 
   # Set LD_LIBRARY_PATH to LD_LIB_PATH. This happens if the script was called recursively.
-  [[ ${LD_LIB_PATH:-false} != false ]] && export LD_LIBRARY_PATH=$LD_LIB_PATH
+  [[ "${LD_LIB_PATH:-false}" != "false" ]] && export LD_LIBRARY_PATH="$LD_LIB_PATH"
 
   sourceEnvironmentSetupScript
 
-  dumpPaths "Files in environment after sourcing the environment script" >> ${extendedLogFile}
-  env >> ${extendedLogFile}
+  dumpPaths "Files in environment after sourcing the environment script" >> "$extendedLogFile"
+  env >> "$extendedLogFile"
 
-  export RODDY_JOBID=${RODDY_JOBID-$$}
-  echo "RODDY_JOBID is set to ${RODDY_JOBID}"
+  export RODDY_JOBID="${RODDY_JOBID:-$$}"
+  echo "RODDY_JOBID is set to $RODDY_JOBID"
 
   # Replace #{RODDY_JOBID} in passed variables.
   while read line; do
     echo $line
-    _temp=$RODDY_JOBID
-    export RODDY_JOBID=`echo $RODDY_JOBID | cut -d "." -f 1`
-    line=${line//-x/};
-    eval ${line//#/\$};
-    export RODDY_JOBID=$_temp
-  done <<< `export | grep "#{"`
+    _temp="$RODDY_JOBID"
+    export RODDY_JOBID="$(echo "$RODDY_JOBID" | cut -d "." -f 1)"
+    line="${line//-x/}"
+    eval ${line//#/\$}
+    export RODDY_JOBID="$_temp"
+  done <<< $(export | grep "#{")
 
   setupRoddyScratch
   export TMP="$RODDY_SCRATCH"
@@ -463,14 +506,14 @@ else
     unlockCommand="rm -f"
   elif [[ -n $(which lockfile-create) && -n $(which lockfile-remove) ]]; then
     echo "Set lockfile commands to lockfile-create and lockfile-remove"
-    lockCommand=lockfile-create
-    unlockCommand=lockfile-remove
+    lockCommand="lockfile-create"
+    unlockCommand="lockfile-remove"
   else
     echo "No file locking available. Won't continue"
     exit 1
   fi
 
-  startCode=STARTED
+  startCode="STARTED"
 
   # Check if the jobs parent jobs are stored and passed as a parameter. If so Roddy checks the job jobState logfile
   # if at least one of the parent jobs exited with a value different to 0.
@@ -479,104 +522,61 @@ else
   # OMG: Bash sucks sooo much: https://stackoverflow.com/questions/7577052/bash-empty-array-expansion-with-set-u
   if [[ -n "${RODDY_PARENT_JOBS[@]:-}" ]]; then
       for parentJob in "${RODDY_PARENT_JOBS[@]}"; do
-         [[ ${exitCode-} == 250 ]] && continue;
-         result=`cat ${jobStateLogFile} | grep -a "^${parentJob}:" | tail -n 1 | cut -d ":" -f 2`
-         [[ $result -ne 0 ]] && echo "At least one of this parents jobs exited with an error code. This job will not run." && startCode="ABORTED"
+        [[ ${exitCode:-} -eq 250 ]] && continue;
+        result="$(grep -a "^$parentJob:" "$jobStateLogFile" | tail -n 1 | cut -d ":" -f 2)"
+        [[ $result -ne 0 ]] \
+          && echo "At least one of this parents jobs exited with an error code. This job will not run." \
+          && startCode="ABORTED"
       done
   fi
 
   # Check the wrapped script for existence
-  [[ ${WRAPPED_SCRIPT-false} == false || ! -f ${WRAPPED_SCRIPT} ]] && startCode=ABORTED && echo "The wrapped script is not defined or not existing."
+  [[ "${WRAPPED_SCRIPT:-false}" == "false" || ! -f "$WRAPPED_SCRIPT" ]] \
+    && startCode="ABORTED" \
+    && echo "The wrapped script is not defined or not existing."
 
-  ${lockCommand} $_lock;
-  echo "${RODDY_JOBID}:${startCode}:"`date +"%s"`":${TOOL_ID}" >> ${jobStateLogFile};
-  ${unlockCommand} $_lock
-  [[ ${startCode} == "ABORTED" ]] && echo "Exiting because a former job died." && exit 250
+  $lockCommand "$_lock"
+  echo "$RODDY_JOBID:$startCode:$(date +"%s"):$TOOL_ID" >> "$jobStateLogFile"
+  $unlockCommand "$_lock"
+  [[ "$startCode" == "ABORTED" ]] && echo "Exiting because a former job died." && exit 250
   # Sleep a second before and after executing the wrapped script. Allow the system to get different timestamps.
   sleep 2
 
-  export WRAPPED_SCRIPT=${WRAPPED_SCRIPT} # Export script so it can identify itself
+  # Export script so it can identify itself.
+  export WRAPPED_SCRIPT="$WRAPPED_SCRIPT"
 
   # Create directories. DIR_TEMP is located in the execution store.
-  mkdir -p ${DIR_TEMP} 2> /dev/null
+  mkdir -p "$DIR_TEMP" 2> /dev/null
 
-  echo "Calling script ${WRAPPED_SCRIPT}"
-  jobProfilerBinary=${JOB_PROFILER_BINARY-}
-  [[ ${enableJobProfiling-false} == false ]] && jobProfilerBinary=""
-
-  myGroup=`groups  | cut -d " " -f 1`
-  outputFileGroup=${outputFileGroup-$myGroup}
+  echo "Calling script $WRAPPED_SCRIPT"
+  jobProfilerBinary="${JOB_PROFILER_BINARY:-}"
+  [[ "${enableJobProfiling:-false}" == "false" ]] && jobProfilerBinary=""
 
   exitCode=0
-  [[ ${disableDebugOptionsForToolscript-false} == true ]] && export WRAPPED_SCRIPT_DEBUG_OPTIONS=""
+  [[ "${disableDebugOptionsForToolscript:-false}" == "true" ]] && export WRAPPED_SCRIPT_DEBUG_OPTIONS=""
 
   echo "######################################################### Starting wrapped script ###########################################################"
-  if [[ "${outerEnvironment:-host}" == "host" ]]; then
-    $jobProfilerBinary bash ${WRAPPED_SCRIPT_DEBUG_OPTIONS:-} $WRAPPED_SCRIPT || exitCode=$?
-  elif [[ "$outerEnvironment" == "apptainer" || "$outerEnvironment" == "singularity" ]]; then
-    # Singularity copies the current environment into the container. This means that important
-    # environment variables, even cluster-specific variables will be available in the container.
-    #
-    # (see https://apptainer.org/docs/user/latest/environment_and_metadata.html#environment-overview).
-    #
-    if [[ "$outerEnvironment" == "singularity" ]]; then
-      containerRuntime="$outerEnvironment"
-      if [[ "${containerExportPath:-false}" == "true" ]]; then
-        # Some variables, however, are *not* exported to singularity by default. Therefore ...
-        SINGULARITYENV_LD_LIBRARY_PATH="$LD_LIBRARY_PATH"
-        export SINGULARITYENV_LD_LIBRARY_PATH
-        SINGULARITYENV_PATH="$PATH"
-        export SINGULARITYENV_PATH
-      fi
-    else
-        containerRuntime="$outerEnvironment"
-        if [[ "${containerExportPath:-false}" == "true" ]]; then
-          # Some variables, however, are *not* exported to apptainer by default. Therefore ...
-          APPTAINERENV_LD_LIBRARY_PATH="$LD_LIBRARY_PATH"
-          export APPTAINERENV_LD_LIBRARY_PATH
-          APPTAINERENV_PATH="$PATH"
-          export APPTAINERENV_PATH
-        fi
-    fi
-
-    inputDir="$(normDir "${inputAnalysisBaseDirectory:?No inputAnalysisBaseDirectory provided}")"
-    outputDir="$(normDir "${outputAnalysisBaseDirectory:?No outputAnalysisBaseDirectory provided}")"
-    workingDir="$PWD"
-
-    # Note the quotes. The received variables are not arrays, because of a bug in Bash that hinders
-    # array variables to be exported. So we export (and import them here) as strings in array
-    # notation. containerMounts should be of the format `(mount1 mount2 mount3)`.
-    declare -a additionalMountDirs="$containerMounts"
-    bindOptions="$(listBindOptions "$inputDir" "$outputDir" "$scratchBaseDirectory" "${additionalMountDirs[@]}")"
-
-    # A path or identifier of a Singularity/Apptainer container.
-    container="${container:?No container provided}"
-
-    "$containerRuntime" run \
-      -W "$workingDir" \
-      -B "$bindOptions" \
-      "$container" \
-      $jobProfilerBinary bash ${WRAPPED_SCRIPT_DEBUG_OPTIONS:-} $WRAPPED_SCRIPT \
-      || exitCode=$?
-  else
-    echo "Invalid value for outerEnvironment: '$outerEnvironment'" >> /dev/stderr
-    exit 1
-  fi
+  $jobProfilerBinary bash $WRAPPED_SCRIPT_DEBUG_OPTIONS "$WRAPPED_SCRIPT" || exitCode=$?
   echo "######################################################### Wrapped script ended ##############################################################"
-  echo "Exited script ${WRAPPED_SCRIPT} with value ${exitCode}"
+  echo "Exited script $WRAPPED_SCRIPT with value $exitCode"
 
   sleep 2
 
-  ${lockCommand} $_lock;
-  echo "${RODDY_JOBID}:${exitCode}:"`date +"%s"`":${TOOL_ID}" >> ${jobStateLogFile};
-  ${unlockCommand} $_lock
+  $lockCommand "$_lock"
+  echo "$RODDY_JOBID:$exitCode:$(date +"%s"):$TOOL_ID" >> "$jobStateLogFile"
+  $unlockCommand "$_lock"
 
   killChildProcesses
 
   # Set this in your command factory class, when roddy should clean up the dir for you.
-  [[ ${RODDY_AUTOCLEANUP_SCRATCH-false} == "true" ]] && rm -rf ${RODDY_SCRATCH} && echo "Auto cleaned up RODDY_SCRATCH"
+  [[ "${RODDY_AUTOCLEANUP_SCRATCH:-false}" == "true" ]] \
+    && rm -rf "$RODDY_SCRATCH" \
+    && echo "Auto cleaned up RODDY_SCRATCH $RODDY_SCRATCH"
 
-  [[ ${exitCode} -eq 100 ]] && echo "Finished script with 99 for compatibility reasons with Sun Grid Engine. 100 is reserved for SGE usage." && exit 99
+  [[ $exitCode -eq 100 ]] \
+    && echo "Finished script with 99 for compatibility reasons with Sun Grid Engine. 100 is reserved for SGE usage." \
+    && exit 99
+
   exit $exitCode
 
 fi
