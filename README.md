@@ -4,6 +4,8 @@ The root of all Roddy plugins, including the PluginBase plugin.
 
 All top-level tools or scripts that are supposed to be started on the cluster by Roddy are actually not directly started, but are wrapped by the `resources/roddyTools/wrapInScript.sh` contained in this plugin.
 
+> Roddy's DefaultPlugin is intended for research-use only (RUO).
+
 ## Dependencies
 
 You need at least Bash 4.2 for running the `wrapInScript.sh`.
