@@ -2,9 +2,16 @@
 
 The root of all Roddy plugins, including the PluginBase plugin.
 
-All top-level tools or scripts that are supposed to be started on the cluster by Roddy are actually not directly started, but are wrapped by the `resources/roddyTools/wrapInScript.sh` contained in this plugin.
+The overall structure of Roddy and its plugins can be depicted like this:
 
-The plugin provides a wrapper script `wrapInScript.sh` which is used to wrap the top-level, bioinformatic (or "wrapped") script that are developed by workflow developers for each (cluster) job. Roddy basically composes a command call for the `wrapInScript.sh`, which then sets up the environment for the wrapped script, calls the wrapped script, and eventually does some cleanup work.
+![image](images/components.svg)
+
+The [PluginBase](https://github.com/TheRoddyWMS/Roddy-Base-Plugin) provides a base class `BasePlugin` for the JVM-compiled code of all plugins.
+Roddy uses this JVM-compiled code to manage cluster jobs and do submission-time checks of input files (usually by accessing the files from the cluster's head-node).
+
+By contrast, the DefaultPlugin provides a wrapper script `wrapInScript.sh` which is used to wrap the top-level, bioinformatic (or "wrapped") script that are developed by workflow developers for each (cluster) job. 
+Roddy basically composes a command call for the `wrapInScript.sh`, which then sets up the environment for the wrapped script, calls the wrapped script, and eventually does some cleanup work.
+
 
 > This software is for research-use only (RUO).
 
@@ -72,7 +79,7 @@ To define a workflow-level environment setup script, you can add lines like the 
 ```
 
 This will declare two environment scripts and select the "workflowEnvironment_conda" as the environment to use. 
-If appropriate, the user running the workflow can still override this setting and select `lsf.sh` as job environment by defining  e.g. `--cvalue="workflowEnvironmentScript:workflowEnvironment_lsf"` on the command line. 
+If appropriate, the user running the workflow can still override this setting and select `lsf.sh` as job environment by defining, e.g. `--cvalue="workflowEnvironmentScript:workflowEnvironment_lsf"` on the command line. 
 In this example, environment scripts need to be located in the `resources/environments` directory in the plugin, which is copied to the execution host.
 
 You may want to specify dedicated job-environment scripts for individual cluster jobs. 
