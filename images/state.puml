@@ -1,0 +1,51 @@
+@startuml
+
+state Setup
+state "Source `baseEnvironmentScript`" as baseEnvironmentScript
+note top of baseEnvironmentScript
+  This script is sourced at the beginning of the wrapper script.
+  to e.g. source `/etc/profile`
+end note
+
+state "Source `PARAMETER_FILE`" as parameterFile
+
+state "Change group" as changeGroup
+
+state "Source job-specific environment script" as jobSpecificEnvironmentScript
+
+state "Setup scratch directory" as setupScratchDirectory
+
+state "Update `jobStateLogfile.txt`" as updateJobStateLogfile
+
+state "Run wrapped script" as runWrappedScript
+
+state "Kill child-process" as killChildProcess
+
+state "Update `jobStateLogfile.txt`" as updateJobStateLogfile2
+
+state "Exit" as exit
+
+
+[*] -down-> Setup
+Setup -down-> baseEnvironmentScript
+baseEnvironmentScript -down-> parameterFile
+parameterFile -right-> changeGroup : if "$outputFileGroup" != "false" \n&& $outputFileGroup != "" \n&& "${sgWasCalled:-false}" == "false"
+
+changeGroup -up-> Setup : sgWasCalled := "true"
+
+parameterFile -down-> jobSpecificEnvironmentScript : otherwise
+
+jobSpecificEnvironmentScript -down-> setupScratchDirectory
+
+setupScratchDirectory -down-> updateJobStateLogfile
+
+updateJobStateLogfile -down-> runWrappedScript
+
+runWrappedScript -down-> killChildProcess
+
+killChildProcess -down-> updateJobStateLogfile2
+
+updateJobStateLogfile2 -down-> exit
+
+
+@enduml

@@ -21,9 +21,13 @@ You need at least Bash 4.2 for running the `wrapInScript.sh`.
 
 ## General Structure
 
-The wrapper script does the following steps
+The wrapper script is called by the cluster job that was submitted by Roddy in a fire-and-forget fashion:
 
 ![image](images/sequence.svg)
+
+The wrapper script does the following steps
+
+![image](images/state.svg)
 
 ## Calling Conventions of the `wrapInScript.sh`
 
@@ -34,7 +38,7 @@ The entire configuration of the `wrapInScript.sh` and the wrapped top-level bioi
 The parameter file should `export` all variables and `export -f` all functions that are needed by the wrapped script.
 * `debugWrapInScript` is a string variable that turns on debugging options in the `wrapInScript.sh`.
 * `outputFileGroup`: Can be set to the name of existing group of which the used user is a member. This group will be used for the output files of the wrapped script.
-* `sgWasCalled`: Should be set to "false" to prevent that `sg` is called to change the primary group (the group used for creating files) before the wrapped script is called.
+* `sgWasCalled`: Should be set to "false" to prevent `sg` from being called to change the primary group (the group used for creating files) before the wrapped script is called.
 
 ## Files created
 
@@ -48,7 +52,7 @@ It contains two dumps of the environment during the execution of the wrapped scr
 
 ### Base Environment Script
 
-Each job is started with the default environment configured in you `applicationProperties.ini` in the `baseEnvironmentScript` variable.
+Each job is started with the default environment configured in your `applicationProperties.ini` in the `baseEnvironmentScript` variable.
 The `baseEnvironmentScript` serves as kind of general configuration of your cluster environment. 
 Usually you will use a script like `/etc/profile` or `$HOME/.profile` or `$HOME/.bashrc`. 
 
