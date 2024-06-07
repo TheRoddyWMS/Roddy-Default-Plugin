@@ -16,6 +16,8 @@ WrapperScript -> BaseEnvironmentScript : source
 
 WrapperScript -> ParameterFile : source
 
+WrapperScript -> JobEnvironmentScript : source
+
 WrapperScript -> WrappedScript
 activate WrappedScript
 
