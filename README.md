@@ -9,7 +9,7 @@ The overall structure of Roddy and its plugins can be depicted like this:
 The [PluginBase](https://github.com/TheRoddyWMS/Roddy-Base-Plugin) provides a base class `BasePlugin` for the JVM-compiled code of all plugins.
 Roddy uses this JVM-compiled code to manage cluster jobs and do submission-time checks of input files (usually by accessing the files from the cluster's head-node).
 
-By contrast, the DefaultPlugin provides a wrapper script `wrapInScript.sh` which is used to wrap the top-level, bioinformatic (or "wrapped") script that are developed by workflow developers for each (cluster) job. 
+By contrast, the DefaultPlugin provides a wrapper script `wrapInScript.sh` which is used to wrap the top-level, bioinformatic (or "wrapped") scripts that are developed by workflow developers for each (cluster) job. 
 Roddy basically composes a command call for the `wrapInScript.sh`, which then sets up the environment for the wrapped script, calls the wrapped script, and eventually does some cleanup work.
 
 
@@ -37,24 +37,26 @@ The entire configuration of the `wrapInScript.sh` and the wrapped top-level bioi
 * `PARAMETER_FILE` is the path to the parameter file that is loaded (and thus evaluated) by the Bash `source` command.
 The parameter file should `export` all variables and `export -f` all functions that are needed by the wrapped script.
 * `debugWrapInScript` is a string variable that turns on debugging options in the `wrapInScript.sh`.
-* `outputFileGroup`: Can be set to the name of existing group of which the used user is a member. This group will be used for the output files of the wrapped script.
+* `outputFileGroup`: Can be set to the name of an existing UNIX group of which the user is a member. This group will be used for the output files of the wrapped script.
 * `sgWasCalled`: Should be set to "false" to prevent `sg` from being called to change the primary group (the group used for creating files) before the wrapped script is called.
 
 ## Files created
 
-* job-state logfile:
+* job-state logfile: The file logging the starts and ends of the wrapper script executions.
 * job-state logfile lock-file: This has the same name and location as the job-state logfile, but with the suffix `~` appended.
-The lock is created only twice, before the job-state logfile is accessed, and deleted after each write operation was finished.
-* `extendedLogs` directory: This directory contains the extended logs of the wrapped script and creates a file for each cluster job (using the job's parameter file name as template).
+The log-file is accessed twice, once before the wrapped script execution, and once after the wrapped script execution, in order to add two logging lines to the file.
+The lock-file is used each time to prevent concurrent modification of the log-file.
+* `$executionLogDir/extendedLogs` directory: This directory contains the extended logs of the wrapped script and creates a file for each cluster job (using the job's parameter file name as template). 
+Each file will be called like the `.parameter` file of the job, but without the `.parameter` suffix.
 It contains two dumps of the environment during the execution of the wrapped script -- before and after the parameter file was `source`d.
 
 ## Environment Setup Support
 
 ### Base Environment Script
 
-Each job is started with the default environment configured in your `applicationProperties.ini` in the `baseEnvironmentScript` variable.
-The `baseEnvironmentScript` serves as kind of general configuration of your cluster environment. 
-Usually you will use a script like `/etc/profile` or `$HOME/.profile` or `$HOME/.bashrc`. 
+Each job is started with the default environment configured _via_ the `baseEnvironmentScript` variable in your `applicationProperties.ini`.
+The `baseEnvironmentScript` serves as general configuration of your cluster environment. 
+Usually, you will use a script like `/etc/profile` or `$HOME/.profile` or `$HOME/.bashrc`. 
 
 Note that often the `baseEnvironmentScript` is not under your control and may be sensitive for certain environment options, such as `set -e` or `set -u`.
 Therefore, error checks and logging options, which are turned on in the `wrapInScript.sh` if you set `debugWrapInScript=true`, will be turned off while reading the base environment.
@@ -119,8 +121,9 @@ The logic to discriminate between these three cases is as follows:
 
 ### Environment Parametrization
 
-The environment script is simply `source`'d, so you can access variables from the parameter-file (`PARAMETER_FILE`, sourced before; see above) from within that script. For instance, you have a `conda.sh` that activates a Conda environment, but you want to keep the environment name configurable. 
-You can then the conda environment name in the XML:
+The environment script is `source`'d after the `PARAMATER_FILE`, so you can access variables from the parameter-file.
+For instance, you have an environment script `conda.sh` that activates a Conda environment, but you want to keep the environment name configurable. 
+You can then set the conda environment name in the XML via some configuration value, e.g.:
 
 ```xml
 <cvalue name="condaEnvironmentName" value="myWorkflow" type="string"
@@ -137,7 +140,7 @@ source activate "$condaEnvironmentName"
 
 The environment setup scripts are mostly useful for setting up environment variables that can be used in the wrapped script, which does the actual job for you.
 
-To achieve this Bash variables need to be exported with the `export` declaration. 
+To achieve this, Bash variables need to be exported with the `export` declaration. 
 
 Sometimes it can be useful to define a Bash function in the environment script, for use in the wrapper.
 These Bash functions can get exported with `export -f`.
@@ -158,18 +161,18 @@ declare -a arrayVar="$arrayStringVar"
 
 ### Debugging and Error Behaviour
   
-The `debugWrapInScript` variable -- defaulting to `false` -- turns on the `set +xv` verbosity shell options. 
+The `debugWrapInScript` variable -- defaulting to `false` -- turns on the `set +xv` verbosity shell options.
   
 The `baseEnvironmentScript` is sourced with relaxed values for `set`, i.e. with `set +ue`, because often files like `/etc/profile` are not under the control of the person running the workflow. Conversely, changes to the `set` options in the `baseEnvironmentScript` are not inherited by subsequent code in the  `wrapInScript.sh`.
 
-The environment script has the same values for the shell options set via `set` in Bash, as the wrapper. 
-In particular this means that `errexit` is set. 
+The environment script has the same values for the shell options set via `set` in Bash, as the wrapper.
+In particular this means that `errexit` is set.
 Changes in the environment script *are* inherited by subsequent code in the `wrapInScript.sh`.
-  
+
 It is possible to run the same command that Roddy runs as remote job from the interactive command line.
 The wrapper script recognizes that it is run in an interactive session and avoids an exiting of the Bash upon errors (i.e. `set +e` is set) but should otherwise behave exactly as if run by `bsub` or `qsub`.
 
-Finally, the wrapped script has debugging options `WRAPPED_SCRIPT_DEBUG_OPTIONS`. 
+Finally, the wrapped script has debugging options `WRAPPED_SCRIPT_DEBUG_OPTIONS`.
 For convenience, the application of these options can be turned off by the `disableDebugOptionsForToolscript`.
 
 ### Wrapped-Script Execution
@@ -191,7 +194,7 @@ The following conventions are nothing more than that and are currently not enfor
 * 1.2.2-5
 
   - Turn off debugging options when sourcing environment files. This allows using environment scripts that fail because of `set -u`).
-  - Refactored lockfile code in `wrapInScript.sh`
+  - Refactored lockfile code in `wrapInScript.sh`.
   - Report if user is not member of `outputFileGroup`.
   - Allow defining environment scripts outside the plugin `resources/` directory.
 
