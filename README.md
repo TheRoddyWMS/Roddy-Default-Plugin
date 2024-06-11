@@ -163,7 +163,7 @@ declare -a arrayVar="$arrayStringVar"
   
 The `debugWrapInScript` variable -- defaulting to `false` -- turns on the `set +xv` verbosity shell options.
   
-The `baseEnvironmentScript` is sourced with relaxed values for `set`, i.e. with `set +ue`, because often files like `/etc/profile` are not under the control of the person running the workflow. Conversely, changes to the `set` options in the `baseEnvironmentScript` are not inherited by subsequent code in the  `wrapInScript.sh`.
+The `baseEnvironmentScript` is sourced with relaxed values for `set`, i.e. with `set +ue`, because often files like `/etc/profile` are not under the control of the person running the workflow. Conversely, changes to the `set` options in the `baseEnvironmentScript` are not inherited by subsequent code in the `wrapInScript.sh`.
 
 The environment script has the same values for the shell options set via `set` in Bash, as the wrapper.
 In particular this means that `errexit` is set.
