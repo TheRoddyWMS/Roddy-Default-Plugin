@@ -1,0 +1,32 @@
+@startuml
+
+activate Roddy
+
+Roddy -> ClusterJob : submit
+activate ClusterJob
+deactivate Roddy
+
+ClusterJob -> WrapperScript : execute
+activate WrapperScript
+
+WrapperScript -> WrapperScript : if `sg` necessary
+activate WrapperScript
+
+WrapperScript -> BaseEnvironmentScript : source
+
+WrapperScript -> ParameterFile : source
+
+WrapperScript -> JobEnvironmentScript : source
+
+WrapperScript -> WrappedScript
+activate WrappedScript
+
+... usually long processing time ...
+
+WrappedScript -> WrapperScript : return code
+
+deactivate WrappedScript
+
+WrapperScript -> ClusterJob : return code
+
+@enduml

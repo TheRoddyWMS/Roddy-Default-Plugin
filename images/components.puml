@@ -1,0 +1,17 @@
+@startuml
+
+component Roddy {
+
+    component DefaultPlugin
+
+    component PluginBase
+
+    component BioinformaticWorkflowXY
+
+    BioinformaticWorkflowXY -up-> PluginBase : imports `wrapInScript.sh`
+
+    PluginBase -up-> DefaultPlugin : imports `BasePlugin` class
+
+}
+
+@enduml
